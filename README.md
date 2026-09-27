@@ -15,14 +15,14 @@ Each release's assets are on its release page: the module jars, `oidf.war`, `gm-
 `MANIFEST`, `SHA256SUMS` and `PROVENANCE.txt`. With the GitHub CLI:
 
 ```sh
-gh release download v0.3.0 -R ID-Partners/pf-agentic-identity -D vendor/
+gh release download v0.4.0 -R ID-Partners/pf-agentic-identity -D vendor/
 ```
 
 or anonymously, one asset at a time:
 
 ```sh
-curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.3.0/SHA256SUMS
-curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.3.0/<asset>
+curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.4.0/SHA256SUMS
+curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.4.0/<asset>
 ```
 
 Then check every file against `SHA256SUMS` before you use it, and record what you took:
@@ -41,10 +41,10 @@ PingFederate 13.1.x; the v0.1.x releases, built for 13.0.x, are not published he
 
 ## Documentation
 
-- docs/operator/ - deploying, health, preflight and upgrading.
-- docs/configuration/ - every setting, by component.
+- [docs/operator/](docs/operator/README.md) - deploying, health, preflight and upgrading.
+- [docs/configuration/](docs/configuration/README.md) - every setting, by component.
 - [docs/federation/](docs/federation/README.md) - OpenID Federation: how it works, configuration, limits.
-- docs/releases/ - each release's notes, and [CHANGELOG.md](CHANGELOG.md).
+- [docs/releases/](docs/releases/README.md) - each release's notes, and [CHANGELOG.md](CHANGELOG.md).
 
 Report a vulnerability as [SECURITY.md](SECURITY.md) says, never in an issue.
 

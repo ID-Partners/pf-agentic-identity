@@ -72,5 +72,7 @@ Three more measures:
   93% of PingFederate's side (712 of 767). It runs weekly in CI and by hand (`mvn -Pmutation verify` on either
   module), and fails below 85%.
 
-To run them: `mvn verify` from the repository root, then `python3 tools/coverage-report.py` to regenerate the
-dashboard. [`docs/federation/conformance-matrix.md`](conformance-matrix.md) says how the ids are written.
+To run them: `mvn verify` from the repository root, then `python3 tools/coverage-report.py` to write the
+dashboard to `docs/coverage-dashboard.md` (not tracked; CI publishes it as the `coverage-dashboard` artefact of
+every Build run whose reactor build completes). [`docs/federation/conformance-matrix.md`](conformance-matrix.md)
+says how the ids are written.
