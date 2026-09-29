@@ -89,7 +89,7 @@ It presents only its evidence; the attester tries every attestation client's tru
 client whose bundle cryptographically verifies the evidence *and* whose bindings contain the resulting
 identity is the match. A `client_id` in the body is accepted and ignored. Two clients matching the same
 identity is a configuration fault and is rejected rather than resolved arbitrarily
-(`AttestationIssuanceServlet:569-641`).
+(`AttestationIssuanceServlet:578-650`).
 
 An `agent_id` anywhere in the request — top level or smuggled inside an `authorization_details` entry —
 is rejected outright, not ignored (`:699`, `:756`). It is the attester's to mint.
@@ -122,9 +122,10 @@ sequenceDiagram
 
 **Why a servlet Filter and not an SDK plugin.** PingFederate has no native support for
 `attest_jwt_client_auth` and no SDK extension point for client authentication. The filter is
-registered by web.xml surgery in the deploy image, and the assemble script asserts the mapping is
-present or fails the build
-(`assemble-pf-runtime-war.sh:136-140`).
+registered in the deploy image's web.xml, as `filters.xml` declares it, and
+the war assembler fails the build unless the mapping is present exactly once, over exactly its declared paths and
+after `OidfAutoRegistration`
+(`build/war-assembler`).
 
 **Why it is verified once.** The filter runs on the webapp classloader and the OGNL criterion on the
 engine classloader, and either can verify an attestation. Verifying spends the PoP `jti` and any
@@ -132,7 +133,7 @@ challenge, so a second verification of the same request would report a replay as
 classloaders share a Redis store. The filter therefore publishes what it verified as a server-side
 request attribute and the criterion reuses it; only a deployment without the filter has the criterion
 verify for itself
-(`ClientAttestationAuthFilter:58-63`,
+(`ClientAttestationAuthFilter:59-64`,
 `ClientAttestationUtils:128-138`).
 
 **Fail-closed, and the one way it is not.** An invalid attestation is rejected at the filter with the
@@ -268,7 +269,7 @@ and `workload.instance_attestation` are gone; see §6).
 
 One thing the code comments promise and the code does not deliver: step 6 reads "resolve the granted
 entitlement against the effective ceiling, then apply any selector-conditioned downscoping the policy
-requires" (`AttestationIssuanceServlet:217-218`). Only the first clause exists. The introspected
+requires" (`AttestationIssuanceServlet:226-227`). Only the first clause exists. The introspected
 selectors and the binding's metadata (`version`, region, whatever the operator declared) are merged
 into `workloadAttributes` and passed to the minter as `workload.attributes` — they are **never read by
 any ceiling computation**. The only narrowing that happens is the asserted-context intersection, and
@@ -665,7 +666,7 @@ the live list as the header instructs.
 ### Production hardening
 
 **Selector-conditioned downscoping does not exist.** The code comment at
-`AttestationIssuanceServlet:217-218` describes it, the `SpireSelectorIntrospector` javadoc gives an
+`AttestationIssuanceServlet:226-227` describes it, the `SpireSelectorIntrospector` javadoc gives an
 example of it ("only grant EMEA when `k8s:ns:demo` is among the selectors"), and the CAS spec §7 rule 4
 allows for it — but nothing implements it. Introspected selectors and binding metadata such as
 `version` are carried into `workload.attributes` and never touch the ceiling. This is the stage that

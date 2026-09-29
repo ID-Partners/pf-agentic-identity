@@ -15,14 +15,14 @@ Each release's assets are on its release page: the module jars, `oidf.war`, `gm-
 `MANIFEST`, `SHA256SUMS` and `PROVENANCE.txt`. With the GitHub CLI:
 
 ```sh
-gh release download v0.4.0 -R ID-Partners/pf-agentic-identity -D vendor/
+gh release download v0.5.0 -R ID-Partners/pf-agentic-identity -D vendor/
 ```
 
 or anonymously, one asset at a time:
 
 ```sh
-curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.4.0/SHA256SUMS
-curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.4.0/<asset>
+curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.5.0/SHA256SUMS
+curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.5.0/<asset>
 ```
 
 Then check every file against `SHA256SUMS` before you use it, and record what you took:
