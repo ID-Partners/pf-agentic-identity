@@ -2,7 +2,7 @@
 
 How another project calls this to ask **"does this consent still permit this, right now?"**
 
-Runnable examples: `examples/`. Start with
+Runnable examples: [`examples/`](../../demo/gm-api). Start with
 `examples/curl/walkthrough.sh` (in the **grant-evaluation-api** repo since the Go extraction).
 
 ---

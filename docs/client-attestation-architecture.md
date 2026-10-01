@@ -54,9 +54,9 @@ repo wrote the missing half up as its own spec draft, published in
 
 Three of these load into PingFederate and the classloader they land on matters. `oidf.jar`,
 `attestation-issuer` and their libraries are merged into `pf-runtime.war` at root context by
-`assemble-pf-runtime-war.sh` — that is why
+[`assemble-pf-runtime-war.sh`](../image/assemble-pf-runtime-war.sh) — that is why
 `/federation/attestation` serves with no `/oidf` prefix. The same jars are *also* copied into
-`server/default/deploy/` by the Dockerfile, because the OGNL
+`server/default/deploy/` by the [Dockerfile](../image/Dockerfile), because the OGNL
 hooks run on PF's engine classloader, which cannot see `pf-runtime.war/WEB-INF/lib`.
 
 ### 2.2 Issuance flow
@@ -122,7 +122,7 @@ sequenceDiagram
 
 **Why a servlet Filter and not an SDK plugin.** PingFederate has no native support for
 `attest_jwt_client_auth` and no SDK extension point for client authentication. The filter is
-registered in the deploy image's web.xml, as `filters.xml` declares it, and
+registered in the deploy image's web.xml, as [`filters.xml`](../image/filters.xml) declares it, and
 the war assembler fails the build unless the mapping is present exactly once, over exactly its declared paths and
 after `OidfAutoRegistration`
 (`build/war-assembler`).
@@ -324,15 +324,17 @@ internal error is 500 `server_error`.
 
 ### 3.6 Configuration
 
-**Per-client PF extended properties — verification** (read by `ClientAttestationUtils` as
-`extproperties.*`): `attestation_pop_max_age`, `attestation_dpop_max_age`, `attestation_clock_skew`,
-`attestation_challenge_required`, `attestation_expected_htu`, `attestation_accepted_algs`,
-`attestation_pop_algs`, `attestation_dpop_algs`, `attestation_required_claims`. Defaults come from
-`ClientAttestationConfig`: skew 60 s, PoP and DPoP max age 300 s, asymmetric algorithms only
-(`RS*`/`PS*`/`ES*`/`EdDSA` — no `none`, no MACs), challenge not required, no required disclosures.
+**Per-client PF extended properties — verification** (read by `AttestationPolicyResolver` from
+PingFederate's client manager, for the filter and the criterion alike from 0.6.0): `attestation_pop_max_age`,
+`attestation_dpop_max_age`, `attestation_clock_skew`, `attestation_challenge_required`, `attestation_expected_htu`,
+`attestation_accepted_algs`, `attestation_pop_algs`, `attestation_dpop_algs`, `attestation_required_claims`. Each can
+only tighten the server's policy, which comes from `ClientAttestationConfig`: skew 60 s, PoP and DPoP max age 300 s,
+asymmetric algorithms only (`RS*`/`PS*`/`ES*`/`EdDSA` - no `none`, no MACs), challenge not required, and the
+required disclosures `OIDF_ATTESTATION_REQUIRED_CLAIMS` names. A value that does not parse or would loosen the policy
+refuses the client (401 `invalid_client`); the pf-integration README's "Each client's attestation policy" has the rules.
 
-`attestation_required` is written onto a client by `RegistrationService` and declared in terraform, but
-**nothing reads it** — verification is driven by the presence of the headers, not by a flag.
+`attestation_required` is written onto a client by the registration paths and declared in terraform, and from 0.6.0
+the filter enforces it: a token request for the client without an attestation is refused (401 `invalid_client`).
 
 **Per-client PF extended properties — issuance** (`AttestationIssuanceConfig`): `attestation_issuer`,
 `attestation_issued_ttl`, `attestation_spiffe_bundle`, `attestation_bundle_url`,
@@ -346,12 +348,12 @@ internal error is 500 `server_error`.
 |---|---|---|
 | `oidf.redis.url` → `OIDF_REDIS_URL` → `REDIS_URL` (+ `OIDF_REDIS_CA_FILE`) | Cluster-wide challenge, replay and evidence-binding store; `rediss://` only under the production profile. Unset = per-node in-memory | No — a resource of whichever environment deploys this, so set outside this repo |
 | `OIDF_ATTESTER_MAX_EVIDENCE_LIFETIME_SECONDS`, `OIDF_ATTESTER_REQUIRE_SINGLE_AUDIENCE_EVIDENCE` | The evidence policy: the lifetime the attester accepts, whole and remaining (86400; production may only shorten it) and whether evidence must name one audience (`false`) | No - the defaults are the safe ones |
-| `OIDF_BRIDGE_SIGNER_BACKING` + `OIDF_BRIDGE_SIGNING_KEYS` (+ `OIDF_BRIDGE_VAULT_ADDR`/`_TOKEN` when `vault`) | Per-client bridge signing. Unconfigured = the filter refuses to start unless `OIDF_ATTESTATION_REQUIRE_BRIDGE_KEY=false`. Each client entry also names its `"attesters"` | No — deployment secrets, set per environment |
+| `OIDF_BRIDGE_SIGNER_BACKING` + `OIDF_BRIDGE_SIGNING_KEYS` (+ `OIDF_BRIDGE_VAULT_ADDR`/`_TOKEN` when `vault`) | Per-client bridge signing. Unconfigured, `ATTESTATION_AUTH` is `FAILED_CONFIG` (its surfaces answer 503, the war keeps serving) unless the component is switched off with `OIDF_ATTESTATION_AUTH_ENABLED=false` (0.6.0; `OIDF_ATTESTATION_REQUIRE_BRIDGE_KEY=false` is now its alias). Each client entry also names its `"attesters"` | No — deployment secrets, set per environment |
 | `OIDF_ATTESTATION_REQUIRE_ATTESTER_BINDING` / `oidf.attestation.require.attester.binding` | **Default true.** A client whose bridge entry names no `attesters` is refused at the token endpoint: federation trust says an attester is genuine, the binding says it is this client's, and without one any trusted attester can mint an attestation naming any client and be bridged as it. `=false` lets unbound clients accept any trusted attester; an explicit binding is still enforced | No — the default is the safe one |
 | ~~`OIDF_BRIDGE_PRIVATE_JWK`~~ | **Superseded and refused.** Setting it now fails startup with a message naming where the key should move to, because a security setting that silently does nothing is worse than one that is absent | Must be unset |
 | `OIDF_REQUIRE_METADATA_POLICY` / `oidf.require.metadata.policy` | **Default true.** Refuses federation registration when no superior in the trust chain declares a `metadata_policy` for the entity type being registered — without one the leaf's self-published `scope`, `grant_types` and `response_types` are granted verbatim | No — the default is the safe one, so a deployment only sets this to relax it |
-| `oidf.mock.attesters` | Static attester trust, bypassing federation trust chains | **Only if the consumer supplies `oidf-mock-attesters.json` in the build context.** The capability image no longer carries one or activates the property unconditionally — which attesters an AS believes is a demo's decision about its own trust |
-| `oidf.attestation.required.claims` | Global required-disclosure default | Yes — `workload`, via the Dockerfile |
+| `oidf.mock.attesters` | Static attester trust, bypassing federation trust chains | **Never, from 0.6.0.** The image ignores an `oidf-mock-attesters.json` in the build context (R-I3); a development deployment mounts the file and sets the property itself, and production refuses it. Which attesters an AS believes is a demo's decision about its own trust |
+| `oidf.attestation.required.claims` | Global required-disclosure default | No, from 0.6.0 - the image no longer writes `workload`; set `OIDF_ATTESTATION_REQUIRED_CLAIMS=workload` to keep it (R-I3) |
 | `OIDF_FEDERATION_TRUST_CONTROLLER_HOST` | Attester trust chain resolution (AS side). Required even in mock mode, or token-endpoint attestation auth NPEs | Yes — staging and production |
 | `OIDF_FEDERATION_TRUST_ANCHOR_JWKS` | The trust controller's public Federation Entity Keys, pinned out of band (OIDFED §4). **Required with the line above**: without it no chain validates, and the filters say so at startup. Captured with `tools/pin-trust-anchor.py` | Staging pinned in the demo repo; production not yet — its anchor is not deployed |
 | `OIDF_TRUST_CONTROLLER_HOST` + `OIDF_ATTESTER_OP_ISSUER` + `OIDF_TRUST_ANCHOR_JWKS` | Federation-backed **wallet-provider** trust (note: different variables from the two lines above) | No |
@@ -374,7 +376,8 @@ consumes its challenges - the authorization server's with the token-endpoint hoo
 attester - across classloaders. With no Redis URL it is per-node LRU+TTL
 (`InMemoryAttestationChallengeService` / `InMemoryAttestationReplayCache` /
 `InMemoryEvidenceBindingStore`, defaults 8192 entries / 300 s). With one, `RedisAttestationStore`
-implements the three interfaces over `MiniRedisClient`, a dependency-free RESP client: issue is
+implements the three interfaces over platform's `RedisClient` (`platform.redis`, plan item C-2; client-attestation's
+`MiniRedisClient` until 0.5.0), a dependency-free RESP client: issue is
 `SET … EX`, consume is `DEL`, first-seen is `SET … NX EX`, bind is `SET … NX PX` then `GET` and compare.
 One view per namespace - `oidf:as:*`, `oidf:cas:*`, `oidf:fed:endpoint:*`, `oidf:admin:dpop:*` - over one
 shared client. `rediss://` verifies the server's certificate and name (the HTTPS algorithm, SNI) and
@@ -436,8 +439,11 @@ it is left visible rather than filled with a plausible guess.
 | `RFC8693 §1.1` | Principal is the subject, agent is the actor | `plugins/rar-paz-plugin` | Implemented |
 | — | RFC 7800 `cnf` | Attestation `cnf.jwk`; access token `cnf.jkt` | Implemented |
 | `RFC7515 §4.1.9` | `typ` matching is case-insensitive and tolerates an `application/` prefix | `JwtCodec.requireType` | Implemented |
-| `RFC7518 §3.4` | ECDSA signatures are fixed-width `r‖s`, not ASN.1/DER | `LocalJwkSigner`, `OpenBaoTransitSigner` | Implemented |
-| `RFC8725 §3.1` | Algorithm verification — no confusion between key types, no `none` | `DelegatedTokenValidator`, `JwtCodec` | Implemented |
+| `RFC7518 §3.3` | RSASSA-PKCS1-v1_5 (`RS256`/`384`/`512`): "A key of size 2048 bits or larger MUST be used" | `LocalJwkSigner` refuses a smaller key when it is built | Implemented (0.6.0, HJOSE) |
+| `RFC7518 §3.4` | ECDSA signatures are fixed-width `r‖s`, not ASN.1/DER; P-256, P-384 and P-521 only, each with its own hash | `LocalJwkSigner`, `OpenBaoTransitSigner` | Implemented - `LocalJwkSigner` refuses another curve, and a declared `alg` that is not its curve's, since 0.6.0 (HJOSE) |
+| `RFC7518 §3.5` | RSASSA-PSS (`PS256`/`384`/`512`), MGF1 with the same hash, salt the hash's length; 2048 bits or larger | `LocalJwkSigner` | Implemented (0.6.0, HJOSE; F-0112) |
+| `RFC8725 §3.1` | Algorithm verification — no confusion between key types, no `none`; one algorithm per key | `DelegatedTokenValidator`, `JwtCodec`, `LocalJwkSigner` | Implemented - every `JwtCodec` verifier refuses `none` and the MAC algorithms, and tries only asymmetric keys not marked `enc`, since 0.6.0 (HJOSE) |
+| `RFC8725 §3.2` | Only algorithms the application accepts; the claims of an unverified JWT decide nothing | `JwtCodec`, `UnverifiedClaims` | Implemented (0.6.0, HJOSE) - the oidf-jose README lists every read before a signature is checked |
 | `RFC8725 §3.8` | Issuer validated | `DelegatedTokenValidator` | Implemented |
 | `RFC8725 §3.9` | Audience validated | `DelegatedTokenValidator` | Implemented |
 | `RFC6750 §2.1` | Bearer credentials in the `Authorization` header, and no other scheme | `SsfHttp.authorize` | Implemented |
@@ -527,7 +533,7 @@ which is why they survive a module count changing and the paragraph above them d
 | ABCA challenge endpoint | `AttestationChallengeServiceTest` (4) | Consumable once; unknown rejected; unique; expired rejected |
 | ABCA replay | `AttestationReplayCacheTest` (4), `RedisAttestationStoreTest` (11) | First-use/replay; `(jti, client)` pairs independent; blank `jti` rejected; bounded cache evicts but stays usable. Redis: same contract cross-instance, **wrong password fails closed**, **Redis down fails closed**, survives stale connections |
 | ABCA `agent_id` extension | `ClientAttestationTest` (3), `AttestationMinterTest` (5) | Null when absent, parsed when present, doesn't perturb other fields; omitted rather than emitted blank |
-| RFC 9449 DPoP | `DpopProofValidatorTest` (9) | Valid accepted; `htu` ignores query/fragment; wrong method/URI/`typ` rejected; missing `jti` rejected; stale rejected; tampered signature rejected; disallowed alg rejected |
+| RFC 9449 DPoP | `DpopProofValidatorTest` (11, in oidf-jose since 0.6.0) | Valid accepted; `htu` ignores query/fragment; wrong method/URI/`typ` rejected; `htm` compared exactly (F-0226); missing `jti` rejected; stale rejected; tampered signature rejected; disallowed alg rejected |
 | RFC 9396 containment | `AuthorizationDetailsGateTest` (20), `AsVectorRunnerTest` and `CasVectorRunnerTest` (the shared vectors through the token gate, the mint, the configuration and the asserted context), `RarModelVectorsTest` in `libs/rar-model`; `RarEntitlementTest` (8) for the unused old check | Grants within entitlement; denies region/action outside; denies when nothing attested but something requested; grants nothing when nothing requested; missing `type` invalid; array parsing |
 | RFC 9396 at issuance | `AttestationAwareRarProcessorTest` (21), `PrincipalPerFlowTest` (8), `ClientAssertedPrincipalTest` (9), `AttestationSubjectTest` (7), `ModelContainmentTest` (16), `ModelGateTest` (9), `RefreshVectorsTest` (149), `ShadedJarCheck` (2) | A non-PERMIT always throws; fail-open only for an unreachable PDP, and it strips the internal `_principal_sub` and `_agent_id` markers; PERMIT merges and strips; a PDP that answered badly throws with its text, the principal hashed and no cause; the principal per OAuth flow, and payments refused before the PDP without an authenticated one. Subject parses the PF hook attribute shape, `agent_id`, `iss` and `rar_models_fingerprint` when published. The containment model: a detail it cannot read is refused before the PDP, a PDP answer it does not find within the request is refused, a refresh must be strictly within its grant, an attestation context with no fingerprint or another one is refused, and the library's `contains` vectors run through PingFederate's parse and refresh loop; the shaded jar carries the model only under its relocated package |
 | RFC 8693 `act` | `ClientAttestationUtilsTest` (3) | Prefers `agent_id` as the acting party; falls back to `client_id` when null or blank |
@@ -554,7 +560,7 @@ are the thin part.
 | ~~`TokenEndpointAutoRegistrationFilter` — no tests~~ **CLOSED** | 5 tests now, including a `client_assertion` with no `trust_chain` header and one with a blank subject — neither reaches `RegistrationService` |
 | ~~`ClientAttestationUtils` — 3 tests, all on actor preference~~ **Stale, not a gap.** `validateClientAttestation` is covered by `VerifyOnceTest` (the single-verify contract); `attestationClaim`/`delegationActChain` by `AttestationClaimSourceTest` (omission with no verified context, flat and workload-nested reads, the attacker-controlled-header case rejected). `ClientAttestationAuthFilterTest`'s `doFilter` tests exercise the same path again, end to end | These are what actually gate token issuance, and they are exercised — this row was simply out of date |
 | No end-to-end test spanning issuance → token endpoint | Every test is unit-level. `AttestationMinterTest` does verify a minted attestation through `ClientAttestationVerifier`, which is the closest thing to a seam test, but nothing exercises the HTTP path |
-| `MiniRedisClient` `rediss://` (TLS) | The plain path is well covered by `FakeRedisServer`; the TLS path is not |
+| ~~`MiniRedisClient` `rediss://` (TLS)~~ **Closed.** The client is platform's `RedisClient` since 0.5.0; `RedisClientTlsTest` and the TLS half of `RedisLiveTest`, which CI runs against a TLS Redis, test the `rediss://` path | Recorded as F-0183 and closed in 0.6.0 |
 | ~~Signature verification in the OGNL claim hooks~~ **Half-closed.** `attestationClaim` no longer base64-decodes the header — it reads `VERIFIED_ATTESTATION_ATTRIBUTE`, published only once the filter has verified (see [the design doc](attestation-client-auth-design.md), Change 3). `delegationActChain`'s `act` claim is still an unverified read of the caller's `subject_token`, by design: the token-exchange processor validates that token separately, before any issuance | The one remaining unverified read is deliberate and documented, not an oversight |
 | **`OpenIdFederationClientResolver`** | `OpenIdFederationClientResolverTest` runs a real federation from the test kit: a chain that validates to the pinned anchor resolves; an entity the anchor does not vouch for, or a configuration that is not an entity statement, is refused; the answer is kept for its TTL; an outage serves the last answer; an entity the anchor stops vouching for loses its clients within one TTL; malformed bindings are skipped. `attestationClients` and `parse` are gated. `AttesterResolversTest` pins the federation → CIMD → PF order and that a federation entity with no pinned anchor stops the attester starting |
 | ~~`PfIssuanceClientResolver` — no test class~~ **CLOSED** | `PfIssuanceClientResolverTest` (8 tests): unknown/disabled clients excluded, a client missing `attestation_issuer` skipped, one misconfigured client doesn't take the rest of the store down with it |
@@ -617,8 +623,8 @@ at the anchor stops issuance within one TTL (§6.2 rule 2). Slice 1 in §8.
 `oidf-mock-attesters.json` and write `oidf.mock.attesters` into `run.properties.subst.default`
 unconditionally, so every image built here pre-trusted `mock-attester-1` — and anyone holding its
 private half could mint attestations that AS accepted with no federation chain. The file is no longer
-in this repo and the property is activated only when a consumer supplies one in the build context
-(`COPY oidf-mock-attesters.jso[n]`, then a guarded `RUN`). Absent it, attester trust resolves through
+in this repo, and from 0.6.0 (R-I3) the image ignores one in the build context: a development
+deployment mounts the file and sets the property itself, and production refuses it. Absent it, attester trust resolves through
 federation trust chains, and the build says which resolver is live. A demo that wants static trust
 supplies its own; no consumer inherits another's attesters.
 
@@ -655,7 +661,7 @@ the mapping — CONFIRM via GET /oauth/accessTokenMappings". If it is wrong, the
 nothing. *Closes when:* the id is confirmed against a live server and the comment is deleted.
 
 **Four extended properties the issuer reads are not declared in terraform.**
-`extended-properties.tf` declares `attestation_required` (which nothing reads) but omits
+`extended-properties.tf` declares `attestation_required` (which the filter enforces from 0.6.0) but omits
 `attestation_evidence`, `attestation_bundle_url`, `attestation_evidence_issuer` and
 `attestation_asserted_context_resolver`. PF rejects an `extended_parameters` entry whose name is not
 declared, so as it stands that terraform cannot create a client using cloud evidence, a remote trust
@@ -713,7 +719,7 @@ to wire. (`unverified.md` item 10.)
 **~~No FAPI 2.0 assessment.~~ Half-closed, 2026-09-24.** PingFederate itself is assessed: the
 conformance rig runs the suite's FAPI 2.0 Security Profile plan against PF 13.1.3 with ordinary FAPI
 clients (`private_key_jwt`, DPoP, PAR, PKCE) - 50 PASSED, 0 FAILED, the REVIEW and WARNING modules
-explained in conformance/README.md - and `Fapi2ProfileFilter` supplies the two
+explained in [conformance/README.md](../demo/README.md) - and `Fapi2ProfileFilter` supplies the two
 rules PF can't apply per client. PAR turned out not to be an absence: PF implements it, and the
 attestation filter is mapped over it. The mTLS sender constraint is one - PF 13.x issues no
 certificate-bound access tokens (RFC 8705 §3) - so DPoP is the sender constraint used. What is still
@@ -771,7 +777,7 @@ the attestation context's `rar_models_fingerprint` shows the two classloaders ho
 | servlets/attestation-issuer/README.md | The issuer module in detail |
 | servlets/pf-integration/README.md | The PF glue: filters, OGNL hooks, key resolvers |
 | services/device-enrolment/README.md | The device path and its enrolment ceremony |
-| build/pingfederate/README.md | How the AS image is built, and what a deployment supplies |
+| [build/pingfederate/README.md](../image/README.md) | How the AS image is built, and what a deployment supplies |
 | DEMOS.md | Which demos exercise this pipeline and how to bring them up |
 
 ---
@@ -860,7 +866,8 @@ statement to expire. The wallet-provider path reads the same anchor set.
   request.~~ **Already covered** — `VerifyOnceTest` predates this slice.
 - ~~`AttesterResolvers` has no test file at all, and `OpenIdFederationClientResolverTest` covers only the
   statement checks.~~ **Done** with slice 1.
-- Still open: `MiniRedisClient`'s `rediss://` path is untested; no test spans issuance → token endpoint end to end.
+- Still open: no test spans issuance → token endpoint end to end. (The Redis client's `rediss://` path, once
+  untested, is tested by `RedisClientTlsTest` and `RedisLiveTest` since 0.5.0.)
 
 ### Slice 5 — Deploy hygiene
 
@@ -868,8 +875,8 @@ statement to expire. The wallet-provider path reads the same anchor set.
 
 - ~~`oidf.mock.attesters` out of the base Dockerfile into a dev-only overlay.~~ **Done** — the file is consumer-supplied and the property is conditional on it.
 - `extended-properties.tf`: add `attestation_evidence`, `attestation_bundle_url`,
-  `attestation_evidence_issuer`, `attestation_asserted_context_resolver`; drop the unread
-  `attestation_required` or wire it.
+  `attestation_evidence_issuer`, `attestation_asserted_context_resolver`. (`attestation_required` is wired: the
+  filter enforces it from 0.6.0.)
 - ~~`OIDF_BRIDGE_PRIVATE_JWK` as a documented deploy secret; consider making the filter refuse to start
   without it rather than degrading silently.~~ **Done** — per-client keys, and it does refuse.
 - Confirm the `attestATM` mapping id against a live server and delete the "CONFIRM" comment.

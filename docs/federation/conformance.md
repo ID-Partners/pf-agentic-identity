@@ -9,7 +9,7 @@ pins. This page says how to run both and what they found.
 The [conformance suite](https://gitlab.com/openid/conformance-suite) has three OpenID Federation plans. They
 are alpha. Two apply to PingFederate; the third tests relying parties, which PingFederate isn't.
 
-Against PingFederate 13.1.3 built by `conformance/up.sh`, with a suite we run
+Against PingFederate 13.1.3 built by [`conformance/up.sh`](../../demo/README.md), with a suite we run
 ourselves at release-v5.3.1:
 
 | Plan | How PingFederate is set up | Result |
@@ -45,7 +45,7 @@ draft's `client_attestation_pop_methods_supported`.
 - an RP's later requests weren't held to §12.1.1.1; now every request is.
 - a token request renewed an RP registered at the authorization endpoint in an agent's shape. It no longer does.
 
-To run them yourself, see `conformance/README.md` ("Testing it"). The
+To run them yourself, see [`conformance/README.md`](../../demo/README.md) ("Testing it"). The
 deployed-entity plan also runs weekly in CI (`.github/workflows/conformance-federation.yml`) against a
 PingFederate built from the clone. A run against a suite you host is evidence, not a certification: that is made
 on the Foundation's hosted suite, by a person.

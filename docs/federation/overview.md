@@ -82,7 +82,7 @@ endpoint can require the caller to authenticate.
 |---|---|
 | The federation itself: chains, policy, constraints, Trust Marks, statements, hosted entities. No PingFederate code. | `libs/openid-federation` |
 | PingFederate's side: the servlets, the registration filters, the OGNL hooks, configuration, logging | `servlets/pf-integration` |
-| A PingFederate you can run from this repo, and the conformance suite's plans against it | `conformance/` |
+| A PingFederate you can run from this repo, and the conformance suite's plans against it | [`conformance/`](../../demo/README.md) |
 
 Next: [how it works](how-it-works.md). Words you don't know are in the [glossary](glossary.md); what it
 doesn't do is in [limits](limits.md).
