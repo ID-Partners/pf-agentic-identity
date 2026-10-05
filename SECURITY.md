@@ -5,8 +5,8 @@ endpoint. Please report one privately.
 
 ## Reporting a vulnerability
 
-Use this repository's private vulnerability reporting: the Security tab, then "Report a vulnerability". It
-opens a draft advisory that only the maintainers can see. Do not open an issue, a discussion or a pull request
+Use this repository's private vulnerability reporting: the **Security and quality** tab (under the ... menu on a
+narrow window), then **Report a vulnerability**. It opens a draft advisory that only the maintainers can see. Do not open an issue, a discussion or a pull request
 that names the module, the endpoint or the trigger.
 
 Say what you found, which release and which artefact, how to reproduce it, and what you think it lets an

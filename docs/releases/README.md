@@ -16,6 +16,12 @@ into the page when the release is cut.
 - [0.6.0.md](0.6.0.md) - Phase 3: secure by default - the production profile enforced, operator OAuth, components
   that fail soft, attestation policy on the filter path, every high targeted at 0.6.0 closed; with its upgrade guide,
   [0.5.0-to-0.6.0.md](../operator/upgrading/0.5.0-to-0.6.0.md).
+- [0.6.1.md](0.6.1.md) - the repository split: releases published at ID-Partners/pf-agentic-identity from an
+  allow-list, 0.3.0 to 0.6.0 mirrored there, and the image and the rig staged from a release; no module changed.
+
+Each page is published at [ID-Partners/pf-agentic-identity](https://github.com/ID-Partners/pf-agentic-identity)
+at its release's tag: from 0.6.1 with the release, and 0.3.0 to 0.6.0 as they were mirrored there. The page at a
+tag does not change; a correction made later appears on that repository's `main` branch.
 
 [CHANGELOG.md](../../CHANGELOG.md) is the one-paragraph-per-version history and links here; the operator guides
 for moving between releases are under [docs/operator/upgrading](../operator/upgrading/).

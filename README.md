@@ -15,14 +15,14 @@ Each release's assets are on its release page: the module jars, `oidf.war`, `gm-
 `MANIFEST`, `SHA256SUMS` and `PROVENANCE.txt`. With the GitHub CLI:
 
 ```sh
-gh release download v0.6.0 -R ID-Partners/pf-agentic-identity -D vendor/
+gh release download v0.6.1 -R ID-Partners/pf-agentic-identity -D vendor/
 ```
 
 or anonymously, one asset at a time:
 
 ```sh
-curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.6.0/SHA256SUMS
-curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.6.0/<asset>
+curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.6.1/SHA256SUMS
+curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.6.1/<asset>
 ```
 
 Then check every file against `SHA256SUMS` before you use it, and record what you took:
@@ -41,9 +41,20 @@ PingFederate 13.1.x; the v0.1.x releases, built for 13.0.x, are not published he
 
 ## The image and the demo
 
-`image/` (the PingFederate image build) and `demo/` (a conformance rig, `demo/up.sh`) are this release's files
-as they were tagged. They build from the private source repository, not from the release assets, so they do
-not run from this repository alone; v0.7.0 is the first release whose image and demo do.
+`image/` builds a PingFederate image with this release's modules merged into PingFederate's own war. Stage the
+release's assets into it, verified against `SHA256SUMS`, then build:
+
+```sh
+image/stage-from-release.sh 0.6.1
+docker build --target capability image/
+```
+
+[image/README.md](image/README.md) describes the targets, the build arguments and the runtime environment.
+
+`demo/` is a conformance rig: `demo/up.sh` stages the same release, boots a configured PingFederate in Docker and
+prints where it answers. It needs Docker and Terraform, and your own Ping DevOps credentials: the image bakes no
+licence, and PingFederate fetches an evaluation licence with them at boot.
+[demo/README.md](demo/README.md) says where they go and what the rig configures.
 
 ## Documentation
 

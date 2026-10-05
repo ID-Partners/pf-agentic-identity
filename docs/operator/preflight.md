@@ -20,6 +20,9 @@ gh release download v0.6.0 --repo ID-Partners/pf-agentic-identity --pattern oidf
 grep ' oidf-preflight.jar$' SHA256SUMS | sha256sum -c -
 ```
 
+Releases are published at `ID-Partners/pf-agentic-identity`; releases up to 0.6.0 are mirrored there with their
+original assets, so their `SHA256SUMS` is unchanged.
+
 Use the jar of the release you are upgrading to: its catalogues are that release's rules. Its manifest names the
 version and the commit (`unzip -p oidf-preflight.jar META-INF/MANIFEST.MF`), and so does the first line of `--list`.
 It runs on the JDK that builds this repository (17), on 21, and on the java in PingFederate's image (21.0.12.1 in

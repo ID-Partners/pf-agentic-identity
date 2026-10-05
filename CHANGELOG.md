@@ -10,7 +10,90 @@ it the heading `[<version>] - <date>`, the date the tag is cut, and leaves an em
 
 ## [Unreleased] - 0.7.0-SNAPSHOT
 
-Nothing yet. The poms move to 0.7.0-SNAPSHOT in the pull request that begins it.
+Phase 4 of the production programme, durable and clustered: the SSF delivery engine, migrations run by db-migrate, the cluster topology with Redis and leases, federation signing-key rollover and subordinate key pinning, metrics and logging, the reference stacks and the cluster verification suite. Release notes arrive as fragments under docs/releases/unreleased and are folded in at release.
+
+## [0.6.1] - 2026-10-05
+
+The repository split: the source repository is private from 2026-10-04, and releases are published as well to the
+public [ID-Partners/pf-agentic-identity](https://github.com/ID-Partners/pf-agentic-identity), generated from an
+allow-list, with 0.3.0 to 0.6.0 mirrored there. The image and the conformance rig can be staged from a release. No
+module's behaviour changes. [Release notes](docs/releases/0.6.1.md).
+
+- `tools/export-public.py` builds the tree `ID-Partners/pf-agentic-identity` receives from an allow-list
+  (`tools/public-export/manifest.txt`), rewrites or de-links its links, and fails on source code, a dead link, an
+  unmapped internal URL, a deny-list hit, a private key or an unexpected binary.
+- The Build workflow's `lint` job runs `python3 tools/export-public.py --check` on every pull request.
+- The image's `org.opencontainers.image.source` label names the public repository,
+  `https://github.com/ID-Partners/pf-agentic-identity`, and the release-download commands in
+  `build/pingfederate/README.md` and `docs/operator/preflight.md` use it.
+
+- `build/pingfederate/stage-from-release.sh` stages `modules/` and `assembler/` from a published release's assets
+  instead of from the reactor: no Maven and no git, every file checked against the release's `SHA256SUMS` before
+  anything is staged, and a fetch that sends no credentials. Build's image job proves its stage equals
+  `stage-modules.sh`'s for both profiles, jar for jar. `stage-lib.sh` holds the `MANIFEST` writer both scripts use.
+- The conformance rig has a release mode: `PF_RELEASE=<version|dir> conformance/up.sh` stages from a release
+  instead of building, and needs no JDK or Maven. `conformance/layout.sh` finds the image build and the
+  PingFederate version in this repository and in the public tree.
+- Two new release assets: `war-assembler-<version>.jar`, the war assembler the image build runs, and
+  `demo-only-ciba-sim.jar`, the rig's CIBA simulator. `tools/ci/assemble-dist.sh` makes the release's `dist/`.
+- `ciba-sim` is no longer deployed to GitHub Packages (F-0120).
+
+- `release.yml` publishes every release to the public repository `ID-Partners/pf-agentic-identity` as well as
+  here: a `public-preflight` job first proves `PUBLIC_REPO_TOKEN` can push there and that private vulnerability
+  reporting is on (a real release with no usable token stops before the internal draft exists), and a
+  `publish-public` job, after the release job, commits the public tree `tools/export-public.py` builds as
+  `Release <version>`, tags it, creates the public release from the same `dist/` bytes, and downloads every asset
+  with no credentials to check it against `SHA256SUMS`. A dry run uploads the tree and the body as artefacts and
+  pushes nothing. Nothing on the public side is ever force-pushed; a commit there this workflow did not make is a
+  stop.
+- A `docs_only` dispatch publishes only the root and docs of `main` or a `v*` tag to the public repository, for
+  corrections to released documentation: no build, no tag, no release.
+- `tools/public-release-body.py` writes a public release's body: the release page's opening, the "Before you
+  deploy" titles linking to the page at its tag, how to verify, the PingFederate line, and the simulator warning,
+  within GitHub's release-body limit (U-0465).
+- `tools/mirror-releases.sh` mirrors v0.3.0 to v0.6.0 onto the public repository once, by hand, byte for byte,
+  with unchanged `SHA256SUMS`; v0.3.0's `pf.plugins.ciba-sim.jar` is not mirrored (F-0120).
+- `PROVENANCE.txt`'s `run:` line names the run id, not a URL in this repository.
+
+- The showcase's packaging and release statements describe what SPC built: `public-preflight` before a release,
+  `publish-public` after it, the public tree's allow-list, the mirror of 0.3.0 to 0.6.0, the two assets
+  `stage-from-release.sh` needs from 0.6.1, and GitHub Packages staying with this repository. The CIBA simulator
+  statement no longer says GitHub Packages receives it (F-0120 stopped that).
+
+- Every job in Build, Docs, Mutation, conformance-federation and iOS runs on the runner the repository variable
+  `RUNNER_LINUX` (or `RUNNER_MACOS` for iOS) names, and on GitHub's hosted runner when the variable is unset or
+  when Dependabot opened the pull request. Nothing is set yet, so every job still runs hosted. Release stays on
+  hosted runners.
+- `tools/ci/install-lint-tools.sh` records Linux arm64 checksums for actionlint, shellcheck, zizmor, gitleaks,
+  grype and syft, so the lint and image steps run on an arm64 Linux runner.
+- `.github/workflows/codeql.yml` is removed: the repository is private from 2026-10-04 and code scanning is not
+  available to it (F-0460, accepted with a review date). `.github/zizmor.yml` drops its entry, U-0130 (CodeQL
+  for Swift) closes as moot, and the showcase's workflow counts lose CodeQL.
+
+- **README.md** - says this is the private source repository and that consumers use the generated public
+  repository, `ID-Partners/pf-agentic-identity`, for releases from 0.6.1 (0.3.0 to 0.6.0 mirrored); "Running
+  PingFederate" gives both modes, `conformance/up.sh` from the reactor and `PF_RELEASE=<version>
+  conformance/up.sh` from a release; "Documentation" links the public export's page; "Provenance" and "License"
+  cover the public repository.
+- **CONTRIBUTING.md** - who contributes (the people with access to the private repository), that the public
+  repository takes issues and no pull requests, and how a public issue reaches the findings register.
+- **SECURITY.md** - vulnerabilities are reported through the public repository's private vulnerability
+  reporting, which is on (F-0068 closed); the interim paragraph is gone; the latest supported release is the one
+  published there; the public tree's generation is in scope.
+- **docs/PROVENANCE.md** - a dated section, "two repositories": nothing moved, what the allow-list keeps here,
+  that the history published before the flip stays published, and that the showcase and its hosting are
+  unchanged.
+- **docs/DEMOS.md** - the conformance rig from a release, `demo/up.sh` in the public repository from 0.6.1.
+- **docs/releases/README.md** - each release page is published in the public repository at its tag.
+- **The "public repository" comments** in `.gitleaksignore`, `.gitignore` and `conformance/.gitignore`, and the
+  style guide's sentence on what is public, describe the two repositories.
+
+- The rig's README (`demo/README.md` in the public tree) no longer names `conformance/layout.sh` or shows
+  `build/pingfederate/README.md` as link text, which a public reader does not have; it says `layout.sh` beside
+  the README and "the image README". Its "Testing it" section says a suite on any origin other than the default
+  must be in `suite_base_urls` when the rig is authored, or PingFederate refuses every redirect.
+- The public SECURITY.md names the tab as GitHub now labels it, **Security and quality** (github/docs
+  `data/features/security-and-quality-tab.yml`, on github.com, read 2026-10-04).
 
 ## [0.6.0] - 2026-10-01
 
@@ -1427,6 +1510,8 @@ Tier 0/1/2 security work. Supersedes v0.1.0.
 The release workflow, so a consumer could tell when it was behind. It published its Maven artefacts and then
 failed before creating a release; nothing consumed it.
 
+[0.6.1]: https://github.com/ID-Partners/pf-agentic-identity/releases/tag/v0.6.1
+[0.6.0]: https://github.com/ID-Partners/pf-agentic-identity/releases/tag/v0.6.0
 [0.5.0]: https://github.com/ID-Partners/pf-agentic-identity/releases/tag/v0.5.0
 [0.4.0]: https://github.com/ID-Partners/pf-agentic-identity/releases/tag/v0.4.0
 [0.3.0]: https://github.com/ID-Partners/pf-agentic-identity/releases/tag/v0.3.0
