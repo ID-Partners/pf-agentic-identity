@@ -7,7 +7,26 @@ before you promise a partner something. Each item says what happens instead.
 
 - **Checking old statements with an entity's historical keys.** PingFederate publishes its own retired keys at
   its historical keys endpoint (§8.7), but when it checks another entity's chain it uses only the keys that
-  entity publishes now. A statement signed with a key since rotated fails, and is fetched again.
+  entity publishes now. A statement signed with a key since rotated fails, and is fetched again. The other way
+  round works from 0.7.0: PingFederate's own Entity Configuration carries its retired keys for their grace, so a
+  peer checking something PingFederate signed just before a rotation still finds the key.
+- **Rotation across a cluster.** From 0.7.0 one node - the `federation-key-observer` lease holder - records the keys
+  PingFederate publishes and moves the active key, after `OIDF_FEDERATION_KEY_ACTIVATION_DELAY_SECONDS`; every node
+  signs with that key ([operations.md](operations.md#changing-pingfederates-signing-key)). What is left: signing lags
+  PingFederate's own key change by the delay; an engine whose PingFederate has not got the active key yet signs with
+  its own current key until it has (`federation.key.activation_skipped`); and with the leases outside the authority's
+  database the observer's history write is fenced only by the lease's local clock (F-0525). The Entity Configuration
+  a node serves is built on that node, so two nodes can briefly publish different `jwks` while a tick passes (U-0025).
+- **A held rollover only delays.** A rollover signed by a pinned key is applied after a hold (a day by default), or
+  earlier on an operator's approval (S7b). Until then the old pin is served, so a subordinate that stops signing with
+  its old pinned key at once fails its chains for the hold, plus one monitor interval, plus a Subordinate Statement's
+  lifetime (25 h 4 min with the defaults): it must keep signing with an old key that long, or have its rollover
+  approved early. There is no automatic path ([operations](operations.md#subordinate-monitor-and-change-control)).
+- **Two-person approval is as strong as the operator clients.** Operators are compared by the token's `sub`: two
+  people on one PingFederate client are one actor (refused), one person with two clients passes.
+- **The subordinate monitor is one node's look.** Under the database store the elected node's fetches decide every
+  state; a subordinate that answers that node differently from others is judged by what that node saw. Under the
+  settings store each node judges its own look, and nothing is applied.
 - **Other ways to authenticate at the federation endpoints.** `private_key_jwt` only (§8.8 lets a federation
   choose others).
 - **A policy decision for every lifecycle step.** The policy engine is asked at explicit registration,
@@ -60,6 +79,10 @@ Each of these is a choice, made so that a gap fails closed. Each is a setting wh
   remembered for as long as it could be used.
 - **The resolve endpoint resolves only entities PingFederate knows** - itself, its subordinates and the agents
   it hosts - unless `OIDF_FEDERATION_RESOLVE_DISCOVERY=any` (§18.1).
+- **One caller gets 30 resolutions a minute** (`OIDF_FEDERATION_RESOLUTION_RESOLVE_SUBJECTS_PER_MINUTE`). A request
+  answered from a kept response (up to 60 seconds) is free; every other one counts, repeated and failing ones too,
+  and one more is 503 with a `Retry-After`. Behind a load balancer, list it in `OIDF_TRUSTED_PROXIES`, or every
+  client behind it shares one minute.
 
 ## About the conformance results
 

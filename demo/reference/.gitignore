@@ -1,0 +1,6 @@
+# Everything a reference stack generates holds or derives from a secret, and stays out of git and the public tree:
+#   <stack>/.local/<name>/   the stack's CA and keys, its passwords and age identity, the config archive (plain and
+#                            age-encrypted), the extracted client-storage SQL and Terraform's state
+*/.local/
+terraform/*/.terraform/
+terraform/*/terraform.tfstate*

@@ -1,0 +1,26 @@
+[
+  {
+    "module": "fapi-ciba-id1-discovery-end-point-verification",
+    "condition": "CheckForUnexpectedParametersInServerMetadata",
+    "level": "WARNING",
+    "why": "conformance/README.md, Results: PingFederate's discovery document carries its own ping_* endpoints and parameters the suite does not know; a WARNING, logged in the module that FAILS below"
+  },
+  {
+    "module": "fapi-ciba-id1-discovery-end-point-verification",
+    "condition": "CheckTLSClientCertificateBoundAccessTokensTrue",
+    "level": "FAILURE",
+    "why": "conformance/README.md, Results: FAPI-CIBA profiles FAPI 1.0 Advanced, which wants certificate-bound tokens (RFC 8705 s3); PingFederate 13.x has none, so discovery has no tls_client_certificate_bound_access_tokens"
+  },
+  {
+    "module": "fapi-ciba-id1",
+    "condition": "EnsureHttpStatusCodeIs4xx",
+    "level": "FAILURE",
+    "why": "conformance/README.md, Results: the happy path's 'client1's TLS cert with client2's access token' step expects a refusal that needs certificate-bound tokens, which PingFederate 13.x cannot issue"
+  },
+  {
+    "module": "fapi-ciba-id1-ensure-mtls-holder-of-key-required",
+    "condition": "CheckTokenEndpointReturnedInvalidClientGrantOrRequestError",
+    "level": "FAILURE",
+    "why": "conformance/README.md, Results: ensure-mtls-holder-of-key-required expects a token request without the client certificate refused; PingFederate 13.x issues tokens without certificate binding"
+  }
+]

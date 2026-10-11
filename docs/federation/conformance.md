@@ -46,8 +46,9 @@ draft's `client_attestation_pop_methods_supported`.
 - a token request renewed an RP registered at the authorization endpoint in an agent's shape. It no longer does.
 
 To run them yourself, see [`conformance/README.md`](../../demo/README.md) ("Testing it"). The
-deployed-entity plan also runs weekly in CI (`.github/workflows/conformance-federation.yml`) against a
-PingFederate built from the clone. A run against a suite you host is evidence, not a certification: that is made
+deployed-entity and OP plans also run weekly in CI, and before every release, against a PingFederate built from
+the clone (`.github/workflows/licensed.yml`, on the self-hosted runner that holds the licence), each held to its
+committed expectations (`conformance/expected/`). A run against a suite you host is evidence, not a certification: that is made
 on the Foundation's hosted suite, by a person.
 
 ## Our own tests

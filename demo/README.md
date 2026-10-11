@@ -35,7 +35,7 @@ the image's own healthcheck ([the image README](../image/README.md#the-healthche
 
 | Step | Script | Produces |
 |---|---|---|
-| 1 | `gen-keys.sh` | `keys/` - eight key pairs: the suite's five clients (two FAPI 2.0, the SSF receiver, two CIBA) and, for the OpenID Federation OP plan, the suite's own trust anchor and its relying party's entity and client keys - PF is only ever given public halves; plus an mTLS CA and two client certificates the FAPI-CIBA plan's configuration insists on, and a CA and certificate for a suite run with `suite/suite-compose.yml`; `secrets.env` - a test-user password and two client secrets |
+| 1 | `gen-keys.sh` | `keys/` - eight key pairs: the suite's five clients (two FAPI 2.0, the SSF receiver, two CIBA) and, for the OpenID Federation OP plan, the suite's own trust anchor and its relying party's entity and client keys - PF is only ever given public halves; plus an mTLS CA and two client certificates the FAPI-CIBA plan's configuration insists on, and a CA and certificate for a suite run with `suite/suite-compose.yml`; `secrets.env` - a test-user password and two client secrets; from 0.7.0 PingFederate's own runtime certificate, `pf-runtime-tls`, from its own CA, naming `localhost`, `host.docker.internal`, the rig's name and the issuer's host (F-0362; `terraform/runtime-tls.tf` imports it and puts the CA in PingFederate's trusted CAs, so a module calling the issuer checks the host name with no JDK switch) |
 | 2 | `author.sh` | a **stock** PF 13.1.3 container with its admin API on `localhost:29999`, the cipher-list overlay and the CIBA plugin staged |
 | 3 | `apply.sh apply` | `terraform/` applied to it: OAuth server settings, a JWT access token manager and mappings, an OIDC policy, a login form and test user, the clients (below) |
 | 4 | `export.sh` | `data.zip` - PF's config archive, its whole saved state; refused if it would fail the suite |
@@ -64,7 +64,7 @@ filters pass every token request to PF's own client authentication, which is wha
 test, its endpoints answer 404, and ready ignores it. Before 0.6.0 the rig kept federation inert by naming PF
 itself trust anchor and trust controller with no pinned keys, because a module that could not start took
 `pf-runtime.war` down; from 0.6.0 that leaves `AUTO_REGISTRATION` enabled and `FAILED_CONFIG` (no pinned
-keys) and `FEDERATION` `DEGRADED`, and ready answers 503 (F-0192). `OIDF_ATTESTATION_REQUIRE_BRIDGE_KEY=false`, the old way to switch
+keys) and `FEDERATION` `DEGRADED`, and ready answers 503 ([F-0192](../docs/findings.md#f-0192)). `OIDF_ATTESTATION_REQUIRE_BRIDGE_KEY=false`, the old way to switch
 attestation off, is a superseded name for the third switch.
 
 **The federation profile makes PF a trust anchor.** `PF_PROFILE=federation ./up.sh` adds
@@ -84,7 +84,10 @@ other. So the suite has to be one whose certificate that CA issued: `suite/suite
 with `keys/suite-tls.crt`.
 
 **A second rig runs beside the first.** `PF_RIG_NAME` names the container, the image and the compose
-project, so a rig built from another checkout doesn't replace this one. Give it its own ports:
+project, so a rig built from another checkout doesn't replace this one. From 0.7.0 `PF_RIG_SLOT` (0 to 44) gives it
+a slot's ports - 57100 + 20 x slot for HTTPS, then HTTP, admin and the authoring server's two - and the name
+`pf-rig-s<slot>`, the same slots the reference stacks use ([reference/README.md](reference/README.md#slots));
+a port or name set explicitly still wins. Or give it its own ports by hand:
 
 ```sh
 PF_RIG_NAME=pfai-fed PF_PROFILE=federation PF_PORT_HTTPS=49031 PF_PORT_HTTP=49080 PF_PORT_ADMIN=49999 \
@@ -210,12 +213,12 @@ Against a PF built this way, driven by a suite run locally at release-v5.3.1:
 
 | Plan | Variant | Result |
 |---|---|---|
-| `openid-ssf-transmitter-test-plan` | discovery, `private_key_jwt` client credentials, poll | 19 of 19 PASSED (again 2026-09-25, on an archive authored fresh on 13.1.3 - 1 of 19 before the audience overlay below; again 2026-09-27, 0.4.0, plan `TVdQER0yiGTQv`; again 2026-09-29, 0.5.0, plan `B1C32vlq6eNRb`; again 2026-10-01, 0.6.0, plan `akGNhQiuPsDqZ`) |
-| `openid-ssf-transmitter-caep-test-plan` | the same, under the CAEP Interop Profile - the plan the Foundation certifies SSF against | 13 of 13 PASSED (2026-09-23 local replica, 2026-09-24 the public rig; needs the `/ssf/events:emit` servlet, `SsfEventEmitServlet`, on `main` as `d4a4219`; on 13.1.3 first on 2026-09-27, 0.4.0, plan `3qTCDGKygzp7l`; again 2026-09-29, 0.5.0, plan `af5vHGFKhJWPs`; again 2026-10-01, 0.6.0, plan `dhENYk4JorcZg`) |
-| `fapi2-security-profile-final-test-plan` | `private_key_jwt`, DPoP, `plain_fapi`, OpenID Connect | 56 modules: 50 PASSED, 3 REVIEW, 2 WARNING, 1 SKIPPED, 0 FAILED (2026-09-24, on 13.1.3; 49/4 on 13.0.3; the same on 2026-09-25 on an archive authored fresh on 13.1.3, on 2026-09-27, 0.4.0, plan `yYAIcz8TxHXIS`, on 2026-09-29, 0.5.0, plan `FTWRpvoSNQpNQ`, and again 2026-10-01, 0.6.0, plan `wk3glGDks0jHK`) |
-| `fapi-ciba-id1-test-plan` | static clients, `private_key_jwt`, poll, `plain_fapi` | 35 modules: 32 PASSED, 3 FAILED (2026-09-24, on 13.0.3 and 13.1.3 alike; the same three on 2026-09-27, 0.4.0, plan `LJh9GLh6lZxGk`, on 2026-09-29, 0.5.0, plan `Elp3NOJhYaiLs`, and again 2026-10-01, 0.6.0, plan `5ICcGR0S3jp6u`) - all three on one PingFederate 13.x product gap, below |
-| `openid-federation-deployed-entity-test-plan` (alpha) | discovery, automatic; `PF_PROFILE=federation`, PF its own trust anchor | 5 modules: 5 WARNING, 0 FAILED (2026-09-25, 13.1.3; again 2026-09-27, 0.4.0, plan `rOAmA0sPt7hqd`; again 2026-09-29, 0.5.0, plan `ZM7mLEPCPKzIN`; again 2026-10-01, 0.6.0, plan `1eliSBjpV6dWh`) - the warning is PF's vendor metadata, below |
-| `openid-federation-entity-joined-to-test-federation-op-test-plan` (alpha) | discovery, automatic; `PF_PROFILE=federation-op`, the suite from `suite/suite-compose.yml` | 20 modules: 20 WARNING, 0 FAILED (2026-09-25, 13.1.3; again 2026-09-27, 0.4.0, plan `vy3fs94kYLVp3`; again 2026-09-29, 0.5.0, plan `rAaWZBJDj5VW0`; again 2026-10-01, 0.6.0, plan `SD8FBsZaFQwcJ`) - the same warning; the 13 negative modules attach PF's refusal page |
+| `openid-ssf-transmitter-test-plan` | discovery, `private_key_jwt` client credentials, poll | 19 of 19 PASSED (again 2026-09-25, on an archive authored fresh on 13.1.3 - 1 of 19 before the audience overlay below; again 2026-09-27, 0.4.0, plan `TVdQER0yiGTQv`; again 2026-09-29, 0.5.0, plan `B1C32vlq6eNRb`; again 2026-10-01, 0.6.0, plan `akGNhQiuPsDqZ`; again 2026-10-08, 0.7.0-SNAPSHOT through the licensed driver, plan `C0hwfXvLPeYeH`; again 2026-10-08 on the self-hosted Linux runner, licensed run 37813420288 at `d9099491`, plan `IacjJxD5Bhmc4`) |
+| `openid-ssf-transmitter-caep-test-plan` | the same, under the CAEP Interop Profile - the plan the Foundation certifies SSF against | 13 of 13 PASSED (2026-09-23 local replica, 2026-09-24 the public rig; needs the `/ssf/events:emit` servlet, `SsfEventEmitServlet`, on `main` as `d4a4219`; on 13.1.3 first on 2026-09-27, 0.4.0, plan `3qTCDGKygzp7l`; again 2026-09-29, 0.5.0, plan `af5vHGFKhJWPs`; again 2026-10-01, 0.6.0, plan `dhENYk4JorcZg`; again 2026-10-08 through the licensed driver, plan `5VOnMB1Go4G7B`; again 2026-10-08 on the self-hosted Linux runner, licensed run 37813420288 at `d9099491`, plan `ZctEfjVTOxGty`) |
+| `fapi2-security-profile-final-test-plan` | `private_key_jwt`, DPoP, `plain_fapi`, OpenID Connect | 56 modules: 50 PASSED, 3 REVIEW, 2 WARNING, 1 SKIPPED, 0 FAILED (2026-09-24, on 13.1.3; 49/4 on 13.0.3; the same on 2026-09-25 on an archive authored fresh on 13.1.3, on 2026-09-27, 0.4.0, plan `yYAIcz8TxHXIS`, on 2026-09-29, 0.5.0, plan `FTWRpvoSNQpNQ`, and again 2026-10-01, 0.6.0, plan `wk3glGDks0jHK`, and 2026-10-08, 0.7.0-SNAPSHOT through the licensed driver, plan `ZOVeDQOm9b93I`; again 2026-10-08 on the self-hosted Linux runner, licensed run 37813420288 at `d9099491`, plan `dR1OYVZ5GDqUy`) |
+| `fapi-ciba-id1-test-plan` | static clients, `private_key_jwt`, poll, `plain_fapi` | 35 modules: 32 PASSED, 3 FAILED (2026-09-24, on 13.0.3 and 13.1.3 alike; the same three on 2026-09-27, 0.4.0, plan `LJh9GLh6lZxGk`, on 2026-09-29, 0.5.0, plan `Elp3NOJhYaiLs`, and again 2026-10-01, 0.6.0, plan `5ICcGR0S3jp6u`, and 2026-10-08, 0.7.0-SNAPSHOT through the licensed driver, plan `wfaRWE9dSuRN7`; again 2026-10-08 on the self-hosted Linux runner, licensed run 37813420288 at `d9099491`, plan `Y5ndZrM35n5pH`) - all three on one PingFederate 13.x product gap, below |
+| `openid-federation-deployed-entity-test-plan` (alpha) | discovery, automatic; `PF_PROFILE=federation`, PF its own trust anchor | 5 modules: 5 WARNING, 0 FAILED (2026-09-25, 13.1.3; again 2026-09-27, 0.4.0, plan `rOAmA0sPt7hqd`; again 2026-09-29, 0.5.0, plan `ZM7mLEPCPKzIN`; again 2026-10-01, 0.6.0, plan `1eliSBjpV6dWh`; again 2026-10-08 through the licensed driver, plan `12mHRNh2retpZ`; again 2026-10-08 on the self-hosted Linux runner, licensed run 37813420288 at `d9099491`, plan `jSIc8mVNtL4X1`) - the warning is PF's vendor metadata, below |
+| `openid-federation-entity-joined-to-test-federation-op-test-plan` (alpha) | discovery, automatic; `PF_PROFILE=federation-op`, the suite from `suite/suite-compose.yml` | 20 modules: 20 WARNING, 0 FAILED (2026-09-25, 13.1.3; again 2026-09-27, 0.4.0, plan `vy3fs94kYLVp3`; again 2026-09-29, 0.5.0, plan `rAaWZBJDj5VW0`; again 2026-10-01, 0.6.0, plan `SD8FBsZaFQwcJ`; again 2026-10-08 through the licensed driver, the suite on the rig's network, plan `Dx3sa49yVsE3I`; again 2026-10-08 on the self-hosted Linux runner, licensed run 37813420288 at `d9099491`, plan `KfMuRBiyabsfV`) - the same warning; the 13 negative modules attach PF's refusal page |
 
 The 2026-09-27 runs are 0.4.0's: a rig built from the release branch (`PF_RIG_NAME=pfai-rel`, its modules built at
 `714e7ce`, PingFederate 13.1.3.0 by its admin API) against this directory's own suite, `suite/suite-compose.yml`, on
@@ -242,6 +245,13 @@ both with `OIDF_FEDERATION_ENABLED=true`. Every result is 0.5.0's: no module reg
 one at a time: a first pass that started a second plan while one was running was interrupted by the suite, which
 stops a running test when another starts under the same alias (FAPI 2.0 plan `3AWmYPRVHlOHk` ended with 3
 INTERRUPTED), and was discarded.
+
+The runs on the self-hosted runner are 0.7.0's code: licensed run
+37813420288, dispatched on `main` at
+`d9099491` on 2026-10-08 (17:25Z-18:21Z), the image built from that commit on PingFederate 13.1.3's base image, each
+plan through `tools/ci/licensed-conformance.sh` against its `expected/<entry>.json` under `--strict-expectations`, one at
+a time on the Lima VM (6 CPUs, 12 GiB). Every result is 0.6.0's: no module regressed and none improved. The code the
+v0.7.0 tag carries is `d9f7892c`, which adds to it C7's cluster suite, the reference stacks' Linux fixes, the entrypoint's refusal of an unreadable archive and the SSF store's start-up line (F-0125: 21 lines in three SSF classes, no behaviour the plans test); the release's own licensed run is in the 0.7.0 notes' "What we verified".
 
 Expect, and do not be alarmed by, in the FAPI 2.0 plan:
 
@@ -291,10 +301,22 @@ re-export, and run the ping plan against that image.
 
 ## Testing it
 
-**In CI**, `.github/workflows/conformance-federation.yml` builds a PF from the clone with `PF_PROFILE=federation`
-and runs the deployed-entity plan against it, weekly and on demand. It needs your licence as the repository
-secrets `PING_IDENTITY_DEVOPS_USER` and `PING_IDENTITY_DEVOPS_KEY`, and it keeps the plan's output. The other
-plans are run by hand, below.
+**In CI**, `.github/workflows/licensed.yml` runs all six plans below, weekly and before a release, one at a time on
+the self-hosted runner that holds the licence (docs/development/ci-runners.md, "Licensed jobs"). Each entry is
+`tools/ci/licensed-conformance.sh <entry>`, which runs the same way on any machine with Docker and your licence
+details: this rig built with the entry's profile, `suite/suite-compose.yml`'s suite on the rig's network (PF is
+`https://<rig name>:9031`, the suite's nginx answers to `host.docker.internal:8443`, so the suite's redirect URIs and
+entity identifiers reach it from either container, on Linux as on Docker Desktop), `render.sh`, and `run-plan.py`
+against `expected/<entry>.json` with `--strict-expectations`. The entries are `fapi2-security-profile-final`,
+`fapi-ciba-id1`, `ssf-transmitter`, `ssf-transmitter-caep`, `federation-deployed-entity` (`PF_PROFILE=federation`)
+and `federation-op` (`PF_PROFILE=federation-op`), with the variants below. Beside another rig, `PF_RIG_SLOT=<n>`
+gives this one a slot's name and ports, as it does for `up.sh`; the suite keeps 8443, so one run at a time per machine.
+
+`expected/<entry>.json` lists the failures a run of that plan is known to have, each with the reason below: `[]`
+where nothing fails, and FAPI-CIBA's three on PingFederate 13.x's missing certificate-bound tokens. To remake one,
+`tools/ci/licensed-conformance.sh <entry> --write-expected` runs the plan without expectations and writes every
+FAILURE and WARNING of each failed module, each with a `why` to fill in from this README; a failure this README does
+not explain is a finding, not an expectation.
 
 `suite/render.sh` turns `suite/*.template.json` into the configurations a suite wants, with the
 clients' private keys and the test user's password filled in. The rendered files are git-ignored.

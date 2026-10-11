@@ -140,3 +140,11 @@ variable "trusted_ca_file_data" {
   type        = string
   default     = ""
 }
+
+# ── the runtime certificate (F-0362) ────────────────────────────────────────────────────────────
+
+variable "pf_runtime_tls_password" {
+  description = "The password of keys/pf-runtime-tls.p12, which ../gen-keys.sh writes to secrets.env (TF_VAR_pf_runtime_tls_password)"
+  type        = string
+  sensitive   = true
+}

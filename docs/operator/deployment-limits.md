@@ -3,44 +3,58 @@
 What a release built from this repository does not support yet, and what goes wrong if you deploy it that way
 anyway. One section per limit; each names the release expected to lift it.
 
-## One PingFederate node, until 0.7.0
+## Clustering, from 0.7.0
 
-0.6.0, like 0.4.0 and 0.5.0, supports **a single PingFederate engine node**. Several pieces of state the modules keep are per node - in
-memory, or behind a loop that assumes it is the only one - and the cluster story that makes them shared is
-Phase 4 of the production programme, release 0.7.0: Redis-backed state through one platform client, leases for
-background work such as SSF push, JDBC client storage, and a cluster verification suite run on reference
-stacks (F-0007). Until then, run one engine node, and do not put two behind a load
-balancer.
+From 0.7.0 a PingFederate cluster is supported in one shape, the one [reference/cluster](../../demo/reference/cluster/README.md)
+runs and the cluster verification suite (plan item C-7) drove on 2026-10-08
+([clustering.md, On the reference cluster](clustering.md#on-the-reference-cluster)), **and only for the components
+that stack runs**: PingFederate's own OAuth clients and tokens, the jdbc leases and SSF's transmitter (push streams
+and emission). The shape:
 
-Some of the state below can be shared today by configuring a store - Redis for the attestation stores, a JDBC
-data store for SSF and the federation authority - and that removes the in-memory half of the problem. It does
-not make a cluster supported: the SSF push loop has no lease, the SSF receiver's dedupe and the challenge
-endpoints' caps stay per node, and nobody has run the modules on two nodes. The SSF module's boot log calls a
-JDBC-backed store "cluster-safe"; in 0.4.0 and 0.5.0 it is not (F-0125); 0.5.0's
-reactor build logged it again on 2026-09-29 (`SSF store: JDBC data store 'pf-ds', dialect 'tables'
-(cluster-safe, durable)`, from the SSF tests).
+- a `CLUSTERED_CONSOLE` and `CLUSTERED_ENGINE` nodes, each with `OIDF_CLUSTER_MODE` set to its mode and the
+  production profile ([clustering.md](clustering.md#what-a-clustered-production-node-needs));
+- PingFederate's OAuth clients in a database (JDBC client storage: `service-points.conf`'s `client.manager` on
+  every node, and PingFederate's own `oauth-client-management-postgresql.sql`);
+- `OIDF_LEASE_BACKEND=jdbc` on a PostgreSQL data store, with the platform migrations applied
+  ([Leases](clustering.md#leases));
+- one Redis for every node (`OIDF_REDIS_URL`) for the state the modules share through it;
+- SSF on the `tables` dialect (`OIDF_SSF_STORE_DIALECT=tables`), so push streams, the receiver's inbox and the
+  emission outbox are shared ([SSF push streams](clustering.md#ssf-push-streams)).
 
-What goes wrong on two nodes today, read from the code on 2026-09-27 (origin/main `714e7ce`) and not driven on a
-cluster. Phase 2 (0.5.0) moved none of it: the platform Redis client (C-2) keeps 0.4.0's keys and adds nothing
-shared, and the managed executors' one-of-each-job claim (C-3) is per JVM, not per cluster, so each node still
-runs its own SSF push loop. Phase 3 (0.6.0) moved none of it either: from 0.6.0 the production profile refuses a
-component whose security state would be kept in one node's memory unless `OIDF_ACCEPTED_RISKS` names
-`in-memory-state` (Phase 3 plan decision 9), which says the node is standalone and does not make the state shared,
-and HSSF2's verification limit and HSSF3's logout replay memory are per node too (F-0385, F-0402):
+In that shape the suite measured: a client registered through the console's admin API reaching the other engine
+within 724 ms, a disable within 60.4 s; a killed lease holder's job (`ssf-stream-sweeper`) taken over by the other
+engine in 31.5 s; 1,000 SSF events on three push streams delivered once each and in order, with an engine killed
+half way and without; PostgreSQL's and an engine's loss recovered with no PingFederate restart; Redis killed and
+paused with no effect - nothing the stack runs reads Redis, so this says nothing of the Redis-backed state below; the
+console stopped for ten minutes with no error on the runtime; and a rolling replacement of every node under load with
+no failed request. A deployment of another shape - the `ldm` dialect, the `redis` lease backend, client storage in
+files - is not what was verified.
 
-| State | Where it lives in 0.4.0 | On two nodes |
+**Not verified on a cluster in 0.7.0: federation, client attestation (the AS side and the attester), automatic
+registration, the SSF receiver, hosting, the operator APIs and FAPI.** The reference cluster switches them off, so
+the suite has not run a challenge on one engine and a token on the other, a replayed proof, evidence binding,
+a registration written by an engine, or the registration-sweeper, ssf-poll-receiver and federation-key-observer
+leases ([F-0601](../findings.md#f-0601), [U-0601](../findings.md#u-0601)). Their state is shared through Redis
+and the data stores as [clustering.md](clustering.md) describes, and a clustered production node refuses them
+without those stores, but that is read from the code, not driven on two nodes. Run them on one node, or on a cluster
+only after your own test of these paths, until F-0601 closes.
+
+What remains, each re-read on origin/main `d9099491` (this branch's merge base) on 2026-10-09:
+
+| Limit | What it means | Until |
 |---|---|---|
-| Attestation challenges, for the token endpoint (`oidf:as:challenge:*`) and the attester (`oidf:cas:challenge:*`) | In memory, per node, unless `OIDF_REDIS_URL` (or `REDIS_URL`) names a Redis (`AttestationSupport`) | A challenge fetched from one node is unknown at the other: the token endpoint answers 400 `use_attestation_challenge`, and the attester 401 `invalid_instance_proof` ("challenge is unknown, expired, or already used"). With Redis the challenge is shared. |
-| Spent proof `jti`s - attestation PoPs and DPoP proofs at the token endpoint, instance-key proofs at the attester, client assertions at the federation endpoints (`oidf:fed:endpoint:*`) | The same | A proof spent at one node can be presented once more at the other until it expires: up to 360 s at the token endpoint, 300 s at the attester and 660 s at a federation endpoint. |
-| Spent request objects and client assertions at automatic registration (`oidf-registration:*`) | The same (`FrontChannelAutoRegistrationFilter`, `RequestObject`) | A request object or client assertion spent at one node can be presented once more at the other until its `exp` plus 60 s of skew, capped at 86,400 s (`MAX_REPLAY_WINDOW_SECONDS`). |
-| Evidence bindings (`oidf:cas:*`) | The same | Evidence bound to its first presenter at one node is unbound at the other, so a second presenter who reaches that node first takes the binding there. |
-| The challenge endpoints' per-caller cap | Always per node: each endpoint's `ChallengeRateLimiter` is a field of its servlet, with no store behind it | Each node grants a caller its own allowance, 60 requests a minute by default, so two nodes grant 120. |
-| SSF streams and their queued SETs | In memory, per node, when the transmitter's `dataStoreId` and `jdbcUrl` are blank (`SsfSupport`, `InMemorySsfStore`) | A stream created through one node does not exist at the other: management and poll requests that reach it answer 404 `not_found`, and an event raised on one node is queued only for that node's streams. |
-| The SSF push loop | One per node, started when PingFederate boots, with no lease (`PushDeliveryService`) | With a shared data store both loops can read the same due SET before either records an attempt on it - `SsfStore.dueForPush` is a plain `SELECT` with no row lock - and both post it, so a receiver can get a SET once per node. Each node's failed attempt is counted towards `pushRetryMaxAttempts` (5 by default), so a stream whose receiver is down can dead-letter after fewer rounds than on one node. |
-| The SSF receiver's `jti` dedupe and its poll acknowledgements | Always per node, whatever the stores: `SsfReceiverService` keeps the `jti`s it has seen in an in-memory set, and `PollReceiverClient` holds the acknowledgements it has yet to send in memory, one poll loop per node with no lease (F-0043) | A SET can be acted on once per node: a transmitter's retried push that reaches the other node, or the same SET handed to both nodes' poll loops before either acknowledges it, passes the other node's dedupe. An acknowledgement a node holds for its next poll is lost with that node, so the transmitter delivers the SET again. `SsfReceiverService`'s own comment counts on the action being idempotent; that the installed handlers are has not been checked. |
-| The federation authority's hosted entities, Trust Marks and key history | In memory, per node, unless `OIDF_AUTHORITY_JDBC_URL` or `OIDF_AUTHORITY_DATA_STORE_ID` names a database (`AuthoritySupport`, `TrustMarkSupport`, `KeyHistorySupport`) | An entity enrolled, or a Trust Mark issued, at one node is unknown at the other. |
-| Clients that automatic or explicit registration creates | PingFederate's client store, written through `MgmtFactory` | Whether another engine node sees the client, and how soon, is unverified (U-0027). |
-| The RAR models document | Read once per PingFederate process (`OIDF_RAR_MODELS_FILE` or `OIDF_RAR_MODELS`) | Nodes given different documents answer the same request differently. Give every node the same one, or none. |
+| The SSF `ldm` dialect is single-node | its push stream leases, receiver inbox and emission outbox are in each node's memory (`LocalStreamLeases`, `LocalReceiverInbox`, `LocalEmissionOutbox`), so a clustered production node refuses SSF on it, naming `OIDF_SSF_STORE_DIALECT=tables` (Phase 4 decision 3; [F-0150](../findings.md#f-0150), [F-0387](../findings.md#f-0387) and the S10f family, accepted by David until 2027-06-30) | 1.1.0 (S10f) |
+| The `redis` lease backend | a Redis failover can lose a lease and its fence counter, so two nodes may run one job at once; a clustered production node takes it only with `redis-lease` accepted ([F-0515](../findings.md#f-0515)) | use `jdbc` |
+| The challenge endpoints' per-caller caps | each endpoint's `ChallengeRateLimiter` is a map in its servlet with no store behind it, so each node grants a caller its own allowance - 60 requests a minute by default, 120 on two nodes. The challenges themselves, spent proofs and evidence bindings are shared through Redis | - |
+| The RAR models document | read once per PingFederate process (`OIDF_RAR_MODELS_FILE` or `OIDF_RAR_MODELS`, `RarModels`): nodes given different documents answer the same request differently. Give every node the same one | - |
+| The client storage window | an engine serves a client it has cached for about a minute after the client is disabled, its secret changed or it is deleted (60.4 s at most over 20 trials; [U-0027](../findings.md#u-0027)). A new client is seen at once | PingFederate's |
+| Federation, attestation, auto-registration, the SSF receiver, hosting, the operator APIs and FAPI on a cluster | not verified (above): the reference cluster switches them off, so the suite has not run the challenge, replay, attested-load, engine-written registration, registration-sweeper, ssf-poll-receiver and federation-key-observer scenarios on two nodes ([F-0601](../findings.md#f-0601), [U-0601](../findings.md#u-0601)) | 0.8.0 |
+| SSF and readiness under the faults | the fault scenarios ran a token load only: no SSF emission ran during the Redis, PostgreSQL, engine-kill and console faults or the rolling upgrade, so "no SET lost" there is not measured (SSF with an engine killed is, in its own scenario); ready stayed 200 through 30 s of PostgreSQL loss while the leases were lost and PingFederate answered 500/503 ([F-0601](../findings.md#f-0601)) | 0.8.0 |
+| A rolling upgrade across a schema change | ran once, on 2026-10-08, from `aaf7389d`'s image to this branch's across V310, with no failed request ([F-0602](../findings.md#f-0602)); the weekly job rolls between two containers of one image, so run `reference/cluster/suite.sh` with `SUITE_ROLL_FROM_PREV=1` before a release whose migrations change | - |
+| A private CA on a new engine | an engine's modules trust only the CAs PingFederate held when its JVM started, and a new engine receives the configuration's trusted CAs with its first replication, so its outbound calls to a host under a private CA fail until it restarts once ([F-0585](../findings.md#f-0585)); reference/cluster restarts each engine once after its first replication | 0.8.0 |
+| `spire` and `mdm`, and load | the reference cluster's `spire` and `mdm` profiles are outside the suite, and the suite's load is a request every 200 ms: capacity under production load is the 1.0 gates' (programme plan, 1.0 gates 3 and 5) | 1.0.0 |
+
+Up to 0.6.x one PingFederate node was supported ([F-0007](../findings.md#f-0007)).
 
 ## The device path, until 0.9.0
 

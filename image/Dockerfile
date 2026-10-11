@@ -51,7 +51,7 @@ ARG OCI_CREATED=
 # The tag and digest are the ones build/pf-version.env records (PF_IMAGE, PF_IMAGE_DIGEST), written out as a
 # literal so Dependabot can bump them here; tools/pf-version-check.py fails when the two disagree, and
 # tools/pf-version-sync.py rewrites the env file from this line after a bump. It is the one FROM that names an
-# image: every later stage starts from this one or from another stage.
+# image a shipped stage starts from; the only other is age-build's Go toolchain, which hands on nothing but age.
 FROM pingidentity/pingfederate:13.1.3-alpine_3.24.1-al21-latest@sha256:0d559261d658222179b07de8b2c84a8aea3cb30c7be107970686f58ea9dd3a4a AS pingfederate
 ARG STAGING_PROFILE
 # Refuse a third value here, at the top, rather than let a typo build a production image by default.
@@ -63,7 +63,7 @@ RUN case "$STAGING_PROFILE" in production|conformance) ;; *) \
 # classloader — the same jars are ALSO copied to server/default/deploy below, so the engine classloader
 # gets its own copy: two classloaders, deliberately, and without Redis the filter and the OGNL criterion
 # therefore keep separate in-memory challenge/replay stores), and register the filters filters.xml declares
-# (SsfLogoutSignal, Fapi2Profile, FapiResourceServer, OAuthErrorDescription, OidfFrontChannelAutoRegistration,
+# (OidfCorrelation, SsfLogoutSignal, Fapi2Profile, FapiResourceServer, OAuthErrorDescription, OidfFrontChannelAutoRegistration,
 # OidfAutoRegistration, ClientAttestationAuth) in its web.xml - via the same assemble script a consumer's CI
 # would use, a wrapper round the war assembler (build/war-assembler) that stage-modules.sh stages into
 # assembler/, run here on the base image's own Java 21 (JAVA_HOME=/opt/java). modules/ holds the reactor's jars
@@ -83,29 +83,72 @@ RUN apk add --no-cache bash \
  && WAR_ASSEMBLER_JAR=/tmp/assembler/war-assembler.jar bash /tmp/assembler/assemble-pf-runtime-war.sh "$STOCK" \
       /tmp/modules - /build/pf-runtime.war "$STAGING_PROFILE"
 
-# --- age: the release binary, checked, in a stage of its own ---
-# age decrypts the configuration archive at boot (pf-entrypoint.sh). It comes from age's own GitHub release,
-# checked against the sha256 recorded here before it is unpacked, and not from apk: the base image has no apk
+# --- age: built from its source with a patched Go, checked, in stages of their own ---
+# age decrypts the configuration archive at boot (pf-entrypoint.sh). It is not from apk: the base image has no apk
 # database (/lib/apk/db holds no installed file), so `apk add` believed nothing was installed and reinstalled the
-# whole of PingFederate's Alpine userland at the day's versions (F-0220). This way the image's system files are
-# the base image's, byte for byte, apart from the two binaries and the licence copied below - Build's image job
-# checks exactly that. The sums are of the archives as downloaded on 2026-09-29 (age publishes sigsum proofs, not
-# a checksums file); the binaries are Go, statically linked, built with golang.org/x/crypto v0.55.0. To move
-# age: change the version and both sums, and build both architectures.
-FROM pingfederate AS age
-USER root
+# whole of PingFederate's Alpine userland at the day's versions (F-0220). Nor is it age's own release binary any
+# more: age 1.3.2's (2026-08-29, still the latest) is built with go1.27.0, whose standard library carries two
+# CRITICAL and eight HIGH advisories fixed in go1.27.2, and those failed Build's image scan (F-0708). So age-build
+# compiles age 1.3.2 from its module source with the Go toolchain pinned below, and nothing else moves: the same
+# module version, so the same dependencies at the versions age's own go.sum names (golang.org/x/crypto v0.55.0,
+# F-0285).
+#
+# The source is checked, not just named: `go install filippo.io/age/cmd/age@v1.3.2` (and cmd/age-keygen) fetches the
+# module from the Go module proxy and verifies its hash, and every dependency's, against the Go checksum database
+# (GOSUMDB, set explicitly here, as are GOPROXY and GOFLAGS=-mod=readonly, so nothing rewrites age's go.sum), and
+# stops on a mismatch. The binaries are static (CGO_ENABLED=0) and built with -trimpath, and are not stripped:
+# `govulncheck -mode binary` needs the symbol table to tell a vulnerable function age calls from one it merely links,
+# which is what F-0285 rests on. age-build runs on the build host's platform and cross-compiles for TARGETARCH; the
+# age stage then runs both binaries on the target's own, so an image of either architecture is smoke-tested where it
+# will run.
+#
+# Only /age - the two binaries and age's LICENSE, from the module source - reaches the image, and no Go does: its
+# system files are the base image's, byte for byte, apart from the two binaries and the licence copied below, and
+# Build's image job checks exactly that. To move age: change AGE_VERSION. To move Go: change the tag and the digest
+# together (the multi-platform index's, from `docker buildx imagetools inspect`).
+FROM --platform=$BUILDPLATFORM golang:1.27.2-alpine3.24@sha256:f92b6ef800e499660581efdabdf25d9d817a9d124eaf900924f0504e7e27e12d AS age-build
 ARG TARGETARCH
 ARG AGE_VERSION=1.3.2
-RUN case "$TARGETARCH" in \
-      amd64) sum=cbe24006683f8eb669266162894b9a522a1af52f2665fbc63a4bb032ed26ac10 ;; \
-      arm64) sum=6b8dc4333c53a5a57c9e5834e3a48f92605d7154014cd07269ff3327db5d37f4 ;; \
-      *) echo "ERROR: no age checksum recorded for '$TARGETARCH'" >&2; exit 1 ;; \
+ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOFLAGS=-mod=readonly GOPROXY=https://proxy.golang.org GOSUMDB=sum.golang.org
+RUN GOOS=linux GOARCH="$TARGETARCH" go install -trimpath \
+      "filippo.io/age/cmd/age@v${AGE_VERSION}" "filippo.io/age/cmd/age-keygen@v${AGE_VERSION}" \
+ && bin="$(go env GOPATH)/bin" && { [ -x "$bin/age" ] || bin="$bin/linux_${TARGETARCH}"; } \
+ && mkdir /age && cp "$bin/age" "$bin/age-keygen" "$(go env GOMODCACHE)/filippo.io/age@v${AGE_VERSION}/LICENSE" /age/ \
+ && chmod 0755 /age/age /age/age-keygen && chmod 0644 /age/LICENSE \
+ && go version -m /age/age
+
+FROM pingfederate AS age
+COPY --from=age-build /age/ /age/
+RUN /age/age --version && /age/age-keygen --version
+
+# --- pgjdbc: PostgreSQL's JDBC driver, checked, in a stage of its own ---
+# The stock image carries no PostgreSQL driver (checked 2026-10-06 against the digest above: h2.jar, hsqldb.jar and
+# spring-jdbc.jar in server/default/lib, and no class org/postgresql/Driver in any jar), and every store here that
+# talks to PostgreSQL needs one: a direct URL (OIDF_SSF_JDBC_URL, OIDF_AUTHORITY_JDBC_URL ...), which platform's
+# DataSources opens with Class.forName("org.postgresql.Driver"), and a PingFederate JDBC data store pointed at
+# PostgreSQL (finding F-0330). So the image ships PgJDBC in server/default/lib, beside PingFederate's own libraries,
+# where the engine and the webapp both see it - never in modules/, which goes into the war. The version is the one
+# the reactor tests with (bom/pom.xml's version.postgresql; tools/pf-version-check.py fails when the two differ), the
+# jar comes from Maven Central and is checked against the sha256 recorded here before anything else reads it. The
+# sum is of the jar as downloaded on 2026-10-06, and agrees with Central's own postgresql-42.7.13.jar.sha1
+# (a6e1bd21b412d6ffb3df23cd13d507bc2cc9e37d) and with the copy in the build's Maven repository. Its licence is
+# BSD-2-Clause, and so are the four OnGres libraries it bundles (SCRAM and SASLprep); the jar's own LICENSE and
+# licenses/ folder are copied out below, as the terms ask a binary distribution to carry them. To move PgJDBC: change
+# the version here and in the BOM, and the sum.
+FROM pingfederate AS pgjdbc
+USER root
+ARG PGJDBC_VERSION=42.7.13
+RUN case "$PGJDBC_VERSION" in \
+      42.7.13) sum=6e0e4cc2d8cae902084f8a2b18728b073a6fd9d1f87c9d8bff8f298c18185b93 ;; \
+      *) echo "ERROR: no checksum recorded for PgJDBC '$PGJDBC_VERSION'" >&2; exit 1 ;; \
     esac \
- && curl -fsSL --retry 3 -o /tmp/age.tar.gz \
-      "https://github.com/FiloSottile/age/releases/download/v${AGE_VERSION}/age-v${AGE_VERSION}-linux-${TARGETARCH}.tar.gz" \
- && echo "$sum  /tmp/age.tar.gz" | sha256sum -c - \
- && mkdir /age && tar -xzf /tmp/age.tar.gz -C /age --strip-components=1 age/age age/age-keygen age/LICENSE \
- && /age/age --version
+ && mkdir /pgjdbc \
+ && curl -fsSL --retry 3 -o "/pgjdbc/postgresql-${PGJDBC_VERSION}.jar" \
+      "https://repo1.maven.org/maven2/org/postgresql/postgresql/${PGJDBC_VERSION}/postgresql-${PGJDBC_VERSION}.jar" \
+ && echo "$sum  /pgjdbc/postgresql-${PGJDBC_VERSION}.jar" | sha256sum -c - \
+ && mkdir /tmp/pgjdbc-meta \
+ && unzip -q "/pgjdbc/postgresql-${PGJDBC_VERSION}.jar" 'META-INF/LICENSE' 'META-INF/licenses/*' -d /tmp/pgjdbc-meta \
+ && mv /tmp/pgjdbc-meta/META-INF /pgjdbc/licence
 
 # --- capability: the image with no configuration archive ---
 FROM pingfederate AS capability
@@ -121,12 +164,17 @@ LABEL io.github.dphhyland.pf-agentic-identity.staging-profile=$STAGING_PROFILE \
       org.opencontainers.image.version=$OCI_VERSION \
       org.opencontainers.image.revision=$OCI_REVISION \
       org.opencontainers.image.created=$OCI_CREATED \
-      org.opencontainers.image.licenses="Apache-2.0 AND BSD-3-Clause AND LicenseRef-PingIdentity-Proprietary"
+      org.opencontainers.image.licenses="Apache-2.0 AND BSD-3-Clause AND BSD-2-Clause AND LicenseRef-PingIdentity-Proprietary"
 
 # age and age-keygen (the entrypoint needs age; test-entrypoint.sh --image makes its fixtures with age-keygen),
 # and age's licence, which its BSD-3-Clause terms ask a binary distribution to carry.
 COPY --from=age --chown=0:0 /age/age /age/age-keygen /usr/local/bin/
 COPY --from=age --chown=0:0 /age/LICENSE /usr/local/share/licenses/age/LICENSE
+
+# PgJDBC (the pgjdbc stage above) into PingFederate's own library directory, which the base image's bootstrap copies
+# from /opt/in to /opt/out at every start as it does deploy/, and its licences - PgJDBC's LICENSE and the licenses/
+# folder that LICENSE points to, as the jar carries them.
+COPY --from=pgjdbc --chown=0:0 /pgjdbc/licence/ /usr/local/share/licenses/pgjdbc/
 
 # The assembled war from the builder. The directories above deploy/ are PingFederate's user's, as the archive's
 # COPY used to leave them when it came first.
@@ -134,6 +182,7 @@ COPY modules/ /tmp/modules/
 RUN mkdir -p /opt/in/instance/server/default/deploy \
  && chown 9031:0 /opt/in/instance /opt/in/instance/server /opt/in/instance/server/default
 COPY --from=builder --chown=9031:0 /build/pf-runtime.war /opt/in/instance/server/default/deploy/pf-runtime.war
+COPY --from=pgjdbc --chown=9031:0 /pgjdbc/*.jar /opt/in/instance/server/default/lib/
 
 # ALSO place the module jars on the ENGINE classpath (server/default/deploy): the token-endpoint OGNL
 # issuance criteria evaluate on the engine classloader, which does NOT search pf-runtime.war's
@@ -166,6 +215,21 @@ RUN F=/opt/staging/instance/bin/run.properties.subst.default \
  && sed -i 's/^pf\.http\.port=-1\([[:space:]]*\)$/pf.http.port=${PF_RUN_PF_HTTP_PORT}\1/' "$F" \
  && [ "$(grep -c '^pf\.http\.port=' "$F")" = 1 ] \
  && grep -q '^pf\.http\.port=\${PF_RUN_PF_HTTP_PORT}[[:space:]]*$' "$F"
+
+# server.log prints PingFederate's request id beside its tracking id (F-0395). A refusal answered at one of our
+# filters runs before PingFederate's endpoint code sets a tracking id, so its reference is PingFederate's
+# httprequestid (docs/operator/logging.md); with the stock pattern ("%d %X{trackingid} %-5p [%c] %m%n") no
+# PingFederate line printed it. The stock log4j2.xml's own comment lists %X{httprequestid} as an available field.
+# The edited copy goes into /opt/in, which the base image's bootstrap lays over the instance at every start, as it
+# does deploy/ and lib/; a server profile's own log4j2.xml still wins. The checks fail the build if the stock pattern
+# ever changes rather than ship an unedited file.
+RUN S=/opt/server/server/default/conf/log4j2.xml D=/opt/in/instance/server/default/conf/log4j2.xml \
+ && [ "$(grep -c '<pattern>%d %X{trackingid} %-5p \[%c\] %m%n</pattern>' "$S")" = 1 ] \
+ && mkdir -p /opt/in/instance/server/default/conf \
+ && sed 's|<pattern>%d %X{trackingid} %-5p \[%c\] %m%n</pattern>|<pattern>%d %X{trackingid} %X{httprequestid} %-5p [%c] %m%n</pattern>|' "$S" > "$D" \
+ && [ "$(grep -c '<pattern>%d %X{trackingid} %X{httprequestid} %-5p \[%c\] %m%n</pattern>' "$D")" = 1 ] \
+ && [ "$(grep -vxFf "$D" "$S" | wc -l)" = 1 ] \
+ && chown -R 9031:0 /opt/in/instance/server/default/conf
 
 # Check and decrypt the archive at boot, with the identity gone from the environment before PingFederate
 # starts, then hand over to the base image's own bootstrap. build/pingfederate/test-entrypoint.sh --image

@@ -1,0 +1,363 @@
+# reference/cluster: a PingFederate console and two engines on the production profile, behind HAProxy (TCP
+# passthrough), with PostgreSQL 17 (TLS only; migrator, runtime and client-storage roles), Redis 7 (TLS only, an ACL
+# user), OpenBao (each node's secrets, rendered by a bao agent per node) and the jobs that make the database ready
+# before any PingFederate starts. Run by ./up.sh, which generates everything under .local/<name>/ this file mounts and
+# exports what it interpolates (reference/lib/common.sh); `docker compose config` works without them, for the lint.
+# Every published port is the slot's and bound to 127.0.0.1. Profiles: spire, mdm (README.md). An example to read
+# and adapt, not a deployment: reference/README.md says which parts are example-only.
+name: ${REF_NAME:-ref-cluster}
+
+x-labels: &labels
+  owner: ${REF_OWNER:-pf-agentic-identity}
+  io.github.dphhyland.pf-agentic-identity.reference: cluster
+
+# Every PingFederate node: the common environment, the node's secrets sourced from its agent's tmpfs, the CA (PgJDBC's
+# sslrootcert and Redis's OIDF_REDIS_CA_FILE), PingFederate's service-points.conf with JDBC client storage (a checked one-line copy of the
+# image's: replication cannot carry it), and DNS_PING over the alias all three nodes share.
+x-pf: &pf
+  image: ${REF_IMAGE:-ref-cluster/pingfederate:local}
+  labels: *labels
+  # The node's secrets are files on the agent's tmpfs; OIDF_REDIS_URL has no _FILE form and pf.cluster.auth.pwd is
+  # PingFederate's, so they come from an env file sourced here before the image's own entrypoint.
+  entrypoint: ["/bin/sh", "-c", "set -a && . /run/oidf/oidf.env && set +a && exec /opt/pf-entrypoint.sh"]
+  env_file:
+    # PING_IDENTITY_DEVOPS_USER / _KEY: each node fetches its own evaluation licence. Never read by these scripts.
+    - path: ${PING_DEVOPS_CONFIG:-${HOME}/.pingidentity/config}
+      required: false
+    - path: ../lib/pf-common.env
+    - path: ./pf.env
+  volumes:
+    - ${REF_LOCAL:-./.local}/tls/ca.crt:/opt/reference/tls/ca.crt:ro
+    - ${REF_LOCAL:-./.local}/service-points.conf:/opt/in/instance/server/default/conf/service-points.conf:ro
+  mem_limit: ${REF_PF_MEM_LIMIT:-1536m}
+
+x-pf-depends: &pf-depends
+  db-migrate: { condition: service_completed_successfully }
+  pf-client-storage: { condition: service_completed_successfully }
+  redis: { condition: service_healthy }
+
+x-agent: &agent
+  image: ${REF_OPENBAO_IMAGE:?}
+  labels: *labels
+  depends_on:
+    bao-init: { condition: service_completed_successfully }
+  user: "0:0"
+  # As root only to hand the node's AppRole files to uid 9031 (the host's 0600 files are unreadable to it wherever
+  # the host's uid differs), then the agent runs as 9031 and renders the node's secrets 0400 onto the tmpfs.
+  entrypoint: ["/bin/sh", "-c"]
+  command:
+    - >-
+      mkdir -p /approle && install -o 9031 -g 0 -m 400 /bao-in/role-id /bao-in/secret-id /approle/ &&
+      chown 9031:0 /run/oidf && exec su-exec 9031:0 bao agent -config=/etc/bao/agent.hcl
+  healthcheck:
+    test: ["CMD", "test", "-s", "/run/oidf/oidf.env"]
+    interval: 2s
+    timeout: 2s
+    retries: 30
+
+services:
+  postgres:
+    extends: { file: ../single/compose.yml, service: postgres }
+    container_name: ${REF_NAME:-ref-cluster}-postgres
+    labels: *labels
+
+  db-roles:
+    extends: { file: ../single/compose.yml, service: db-roles }
+    container_name: ${REF_NAME:-ref-cluster}-db-roles
+    labels: *labels
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  db-migrate:
+    extends: { file: ../single/compose.yml, service: db-migrate }
+    container_name: ${REF_NAME:-ref-cluster}-db-migrate
+    labels: *labels
+    depends_on:
+      db-roles: { condition: service_completed_successfully }
+
+  # PingFederate's own client storage script, from the pinned image, as pf_clients in schema pf (lib/pf-client-storage.sh).
+  pf-client-storage:
+    image: ${REF_POSTGRES_IMAGE:?}
+    container_name: ${REF_NAME:-ref-cluster}-pf-client-storage
+    labels: *labels
+    depends_on:
+      db-roles: { condition: service_completed_successfully }
+    # As root (0:0, pinned rather than left to the image): it reads the host user's 0600 files, which an image
+    # user can read on Linux only by matching that uid. reference/README.md, "File ownership on Linux".
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/etc/reference/pf-client-storage.sh"]
+    volumes:
+      - ${REF_LOCAL:-./.local}/tls/ca.crt:/tls/ca.crt:ro
+      - ${REF_LOCAL:-./.local}/secrets/pf-clients:/secrets/pf-clients:ro
+      - ${REF_LOCAL:-./.local}/oauth-client-management-postgresql.sql:/sql/oauth-client-management-postgresql.sql:ro
+      - ../lib/pf-client-storage.sh:/etc/reference/pf-client-storage.sh:ro
+    restart: "no"
+
+  # TLS only (--port 0), the default user off, and one ACL user, oidf, held to the modules' key prefixes and the
+  # commands libs/platform's Redis client sends (lib/redis-acl.sh writes the file up.sh mounts).
+  redis:
+    image: ${REF_REDIS_IMAGE:?}
+    container_name: ${REF_NAME:-ref-cluster}-redis
+    labels: *labels
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        install -o redis -g redis -m 400 /tls/redis.key /run/redis.key &&
+        install -o redis -g redis -m 400 /acl/users.acl /run/users.acl &&
+        exec docker-entrypoint.sh redis-server --port 0 --tls-port 6379
+        --tls-cert-file /tls/redis.crt --tls-key-file /run/redis.key --tls-ca-cert-file /tls/ca.crt
+        --tls-auth-clients no --aclfile /run/users.acl --save '' --appendonly no
+    volumes:
+      - ${REF_LOCAL:-./.local}/tls/ca.crt:/tls/ca.crt:ro
+      - ${REF_LOCAL:-./.local}/tls/redis.crt:/tls/redis.crt:ro
+      - ${REF_LOCAL:-./.local}/tls/redis.key:/tls/redis.key:ro
+      - ${REF_LOCAL:-./.local}/redis/users.acl:/acl/users.acl:ro
+    ports:
+      - "127.0.0.1:${PFAI_PORT_REDIS:-57112}:6379"
+    healthcheck:
+      # PING needs no user: an unauthenticated connection to a server whose default user is off is answered NOAUTH,
+      # which says the server is up and speaking TLS.
+      test: ["CMD-SHELL", "redis-cli --tls --cacert /tls/ca.crt -h redis ping 2>&1 | grep -Eq 'PONG|NOAUTH'"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  openbao:
+    image: ${REF_OPENBAO_IMAGE:?}
+    container_name: ${REF_NAME:-ref-cluster}-openbao
+    labels: *labels
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        mkdir -p /run/bao-tls && install -o openbao -m 400 /tls/openbao.key /run/bao-tls/openbao.key &&
+        install -o openbao -m 444 /tls/openbao.crt /run/bao-tls/openbao.crt && chown -R openbao /openbao/file &&
+        exec su-exec openbao bao server -config=/etc/bao/server.hcl
+    volumes:
+      - ${REF_LOCAL:-./.local}/tls/openbao.crt:/tls/openbao.crt:ro
+      - ${REF_LOCAL:-./.local}/tls/openbao.key:/tls/openbao.key:ro
+      - ./bao/server.hcl:/etc/bao/server.hcl:ro
+      - bao-data:/openbao/file
+    ports:
+      - "127.0.0.1:${PFAI_PORT_OPENBAO:-57113}:8200"
+
+  bao-init:
+    image: ${REF_OPENBAO_IMAGE:?}
+    container_name: ${REF_NAME:-ref-cluster}-bao-init
+    labels: *labels
+    user: "${REF_UID:-1000}:${REF_GID:-1000}"
+    depends_on: [openbao]
+    entrypoint: ["/bin/sh", "/etc/reference/bao-init.sh"]
+    environment:
+      HOME: /tmp
+    volumes:
+      - ${REF_LOCAL:-./.local}/tls/ca.crt:/tls/ca.crt:ro
+      - ${REF_LOCAL:-./.local}/secrets:/secrets:ro
+      - ${REF_LOCAL:-./.local}/bao:/bao
+      - ../lib/bao-init.sh:/etc/reference/bao-init.sh:ro
+    restart: "no"
+
+  agent-console:
+    <<: *agent
+    container_name: ${REF_NAME:-ref-cluster}-agent-console
+    environment: { REF_NODE: console }
+    volumes:
+      - ${REF_LOCAL:-./.local}/tls/ca.crt:/tls/ca.crt:ro
+      - ${REF_LOCAL:-./.local}/bao/console:/bao-in:ro
+      - ./bao/agent.hcl:/etc/bao/agent.hcl:ro
+      - run-console:/run/oidf
+
+  agent-engine-1:
+    <<: *agent
+    container_name: ${REF_NAME:-ref-cluster}-agent-engine-1
+    environment: { REF_NODE: engine-1 }
+    volumes:
+      - ${REF_LOCAL:-./.local}/tls/ca.crt:/tls/ca.crt:ro
+      - ${REF_LOCAL:-./.local}/bao/engine-1:/bao-in:ro
+      - ./bao/agent.hcl:/etc/bao/agent.hcl:ro
+      - run-engine-1:/run/oidf
+
+  agent-engine-2:
+    <<: *agent
+    container_name: ${REF_NAME:-ref-cluster}-agent-engine-2
+    environment: { REF_NODE: engine-2 }
+    volumes:
+      - ${REF_LOCAL:-./.local}/tls/ca.crt:/tls/ca.crt:ro
+      - ${REF_LOCAL:-./.local}/bao/engine-2:/bao-in:ro
+      - ./bao/agent.hcl:/etc/bao/agent.hcl:ro
+      - run-engine-2:/run/oidf
+
+  # The console: the only node that boots from the archive. up.sh asks it to replicate once it is up.
+  console:
+    <<: *pf
+    container_name: ${REF_NAME:-ref-cluster}-console
+    hostname: console
+    depends_on:
+      <<: *pf-depends
+      agent-console: { condition: service_healthy }
+    networks:
+      default:
+        aliases: [pf-cluster]
+    environment:
+      OPERATIONAL_MODE: CLUSTERED_CONSOLE
+      OIDF_CLUSTER_MODE: CLUSTERED_CONSOLE
+      PF_ARCHIVE_FILE: /opt/reference/archive/data.zip.age
+      OIDF_SSF_ISSUER: ${REF_ISSUER:-https://pf.reference.test:57105}
+    volumes:
+      - ${REF_LOCAL:-./.local}/tls/ca.crt:/opt/reference/tls/ca.crt:ro
+      - ${REF_LOCAL:-./.local}/service-points.conf:/opt/in/instance/server/default/conf/service-points.conf:ro
+      - ${REF_LOCAL:-./.local}/data.zip.age:/opt/reference/archive/data.zip.age:ro
+      - run-console:/run/oidf:ro
+    ports:
+      - "127.0.0.1:${PFAI_PORT_ADMIN:-57106}:9999"
+
+  # The engines: no archive - each takes the configuration the console replicates - and each on its own runtime port,
+  # published, so C-7 can address one engine past HAProxy.
+  engine-1:
+    <<: *pf
+    container_name: ${REF_NAME:-ref-cluster}-engine-1
+    hostname: engine-1
+    depends_on:
+      <<: *pf-depends
+      agent-engine-1: { condition: service_healthy }
+      console: { condition: service_started }
+    networks:
+      default:
+        aliases: [pf-cluster]
+    environment:
+      OPERATIONAL_MODE: CLUSTERED_ENGINE
+      OIDF_CLUSTER_MODE: CLUSTERED_ENGINE
+      PF_ENGINE_PORT: ${PFAI_PORT_ENGINE_1:-57107}
+      OIDF_SSF_ISSUER: ${REF_ISSUER:-https://pf.reference.test:57105}
+    volumes:
+      - ${REF_LOCAL:-./.local}/tls/ca.crt:/opt/reference/tls/ca.crt:ro
+      - ${REF_LOCAL:-./.local}/service-points.conf:/opt/in/instance/server/default/conf/service-points.conf:ro
+      - run-engine-1:/run/oidf:ro
+    ports:
+      - "127.0.0.1:${PFAI_PORT_ENGINE_1:-57107}:${PFAI_PORT_ENGINE_1:-57107}"
+
+  engine-2:
+    <<: *pf
+    container_name: ${REF_NAME:-ref-cluster}-engine-2
+    hostname: engine-2
+    depends_on:
+      <<: *pf-depends
+      agent-engine-2: { condition: service_healthy }
+      console: { condition: service_started }
+    networks:
+      default:
+        aliases: [pf-cluster]
+    environment:
+      OPERATIONAL_MODE: CLUSTERED_ENGINE
+      OIDF_CLUSTER_MODE: CLUSTERED_ENGINE
+      PF_ENGINE_PORT: ${PFAI_PORT_ENGINE_2:-57108}
+      OIDF_SSF_ISSUER: ${REF_ISSUER:-https://pf.reference.test:57105}
+    volumes:
+      - ${REF_LOCAL:-./.local}/tls/ca.crt:/opt/reference/tls/ca.crt:ro
+      - ${REF_LOCAL:-./.local}/service-points.conf:/opt/in/instance/server/default/conf/service-points.conf:ro
+      - run-engine-2:/run/oidf:ro
+    ports:
+      - "127.0.0.1:${PFAI_PORT_ENGINE_2:-57108}:${PFAI_PORT_ENGINE_2:-57108}"
+
+  haproxy:
+    image: ${REF_HAPROXY_IMAGE:?}
+    container_name: ${REF_NAME:-ref-cluster}-haproxy
+    labels: *labels
+    depends_on: [engine-1, engine-2]
+    networks:
+      default:
+        aliases: [pf.reference.test]
+    environment:
+      REF_RUNTIME_PORT: ${PFAI_PORT_RUNTIME:-57105}
+      REF_ENGINE_1_PORT: ${PFAI_PORT_ENGINE_1:-57107}
+      REF_ENGINE_2_PORT: ${PFAI_PORT_ENGINE_2:-57108}
+    volumes:
+      - ./haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - ${REF_LOCAL:-./.local}/tls/ca.crt:/tls/ca.crt:ro
+    ports:
+      - "127.0.0.1:${PFAI_PORT_RUNTIME:-57105}:${PFAI_PORT_RUNTIME:-57105}"
+      - "127.0.0.1:${PFAI_PORT_HAPROXY_API:-57109}:9999"
+      - "127.0.0.1:${PFAI_PORT_HAPROXY_STATS:-57110}:8404"
+
+  # --- profile spire: a SPIRE server and agent (Phase 5's attester SPIRE reader, X-B07, reads what they issue) ---
+  spire-server:
+    profiles: [spire]
+    image: ${REF_SPIRE_SERVER_IMAGE:?}
+    container_name: ${REF_NAME:-ref-cluster}-spire-server
+    labels: *labels
+    command: ["-config", "/etc/spire/server.conf"]
+    volumes:
+      - ./spire/server.conf:/etc/spire/server.conf:ro
+      - spire-server-data:/var/lib/spire/server
+    healthcheck:
+      test: ["CMD", "/opt/spire/bin/spire-server", "healthcheck", "-socketPath", "/tmp/spire-server/private/api.sock"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
+  # Joins with the one-time token up.sh generates on the server (REF_SPIRE_JOIN_TOKEN), and attests workloads by
+  # their Docker labels, so it reads the host's Docker socket.
+  spire-agent:
+    profiles: [spire]
+    image: ${REF_SPIRE_AGENT_IMAGE:?}
+    container_name: ${REF_NAME:-ref-cluster}-spire-agent
+    labels: *labels
+    pid: host
+    depends_on:
+      spire-server: { condition: service_healthy }
+    command: ["-config", "/etc/spire/agent.conf", "-joinToken", "${REF_SPIRE_JOIN_TOKEN:-unset}"]
+    volumes:
+      - ./spire/agent.conf:/etc/spire/agent.conf:ro
+      - spire-agent-data:/var/lib/spire/agent
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  # --- profile mdm: services/device-enrolment, development profile, in-memory registry (Phase 6 adds the rest) ---
+  device-enrolment:
+    profiles: [mdm]
+    image: ${REF_JRE_IMAGE:?}
+    container_name: ${REF_NAME:-ref-cluster}-device-enrolment
+    labels: *labels
+    # As root (0:0, pinned rather than left to the image): it reads the host user's 0600 files, which an image
+    # user can read on Linux only by matching that uid. reference/README.md, "File ownership on Linux".
+    user: "0:0"
+    # ENROLMENT_SIGNING_JWK has no _FILE form: read from the mounted file into the environment of the JVM alone.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        ENROLMENT_SIGNING_JWK="$$(cat /secrets/enrolment-signing.jwk)" exec java
+        -cp '/opt/device-enrolment/device-enrolment.jar:/opt/device-enrolment/dependency/*'
+        com.pingidentity.ps.oidf.enrolment.Main
+    environment:
+      OIDF_DEPLOYMENT_PROFILE: development
+      REGISTRY: memory
+      PORT: "8080"
+      ENROLMENT_ISSUER: https://mdm.reference.test:${PFAI_PORT_MDM:-57117}
+    volumes:
+      - ${REF_LOCAL:-./.local}/device-enrolment:/opt/device-enrolment:ro
+      - ${REF_LOCAL:-./.local}/secrets/enrolment-signing.jwk:/secrets/enrolment-signing.jwk:ro
+    ports:
+      - "127.0.0.1:${PFAI_PORT_MDM:-57117}:8080"
+
+volumes:
+  pgdata:
+    labels: *labels
+  bao-data:
+    labels: *labels
+  spire-server-data:
+    labels: *labels
+  spire-agent-data:
+    labels: *labels
+  run-console:
+    labels: *labels
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,mode=0755" }
+  run-engine-1:
+    labels: *labels
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,mode=0755" }
+  run-engine-2:
+    labels: *labels
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,mode=0755" }
+
+networks:
+  default:
+    labels: *labels

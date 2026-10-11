@@ -13,6 +13,11 @@
 #                     stage-from-release.sh's cache for PF_RELEASE (or release.env's PFAI_RELEASE); empty in
 #                     reactor mode
 #
+# pfai_slot_ports SLOT (C-6) gives a slot, 0 to 44, its own twenty host ports from 57100 + 20 x SLOT, so parallel
+# worktrees each run a rig or a reference stack without colliding: it exports PFAI_SLOT_BASE and PFAI_PORT_<NAME>
+# for each offset in PFAI_SLOT_OFFSETS, and returns non-zero (after saying why) for anything but a whole number
+# in range. reference/README.md has the table.
+#
 # In reactor mode PF_AGENTIC_IDENTITY_HOME, when set, still names the checkout whose build/pingfederate and
 # build/pf-version.env are used (a sibling clone's modules, as before this file); release mode ignores it.
 _pfai_here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,3 +55,22 @@ if [[ "$PFAI_MODE" == release ]]; then
 fi
 export PFAI_ROOT PFAI_MODE PFAI_IMAGE_DIR PFAI_VERSION_ENV PFAI_RELEASE_DIR
 unset _pfai_here _pfai_base _pfai_version
+
+# The slot layout: NAME=offset, fixed. Offsets 0-4 are the rig's (up.sh, PF_RIG_SLOT); 5-17 a reference stack's
+# (REF_SLOT); 18-19 are spare. Changing an offset moves every stack that uses it, so add, never renumber.
+PFAI_SLOT_OFFSETS="RIG_HTTPS=0 RIG_HTTP=1 RIG_ADMIN=2 RIG_AUTHOR_ADMIN=3 RIG_AUTHOR_RUNTIME=4
+RUNTIME=5 ADMIN=6 ENGINE_1=7 ENGINE_2=8 HAPROXY_API=9 HAPROXY_STATS=10 POSTGRES=11 REDIS=12 OPENBAO=13
+AUTHOR_ADMIN=14 AUTHOR_RUNTIME=15 SPIRE=16 MDM=17"
+export PFAI_SLOT_OFFSETS
+pfai_slot_ports() {
+  local slot="${1:-}" pair
+  if [[ ! "$slot" =~ ^(0|[1-9][0-9]?)$ ]] || (( slot > 44 )); then
+    echo "ERROR: a slot is a whole number from 0 to 44, not '$slot'" >&2
+    return 1
+  fi
+  PFAI_SLOT_BASE=$((57100 + 20 * slot))
+  export PFAI_SLOT_BASE
+  for pair in $PFAI_SLOT_OFFSETS; do
+    export "PFAI_PORT_${pair%%=*}=$((PFAI_SLOT_BASE + ${pair#*=}))"
+  done
+}

@@ -15,14 +15,14 @@ Each release's assets are on its release page: the module jars, `oidf.war`, `gm-
 `MANIFEST`, `SHA256SUMS` and `PROVENANCE.txt`. With the GitHub CLI:
 
 ```sh
-gh release download v0.6.1 -R ID-Partners/pf-agentic-identity -D vendor/
+gh release download v0.7.0 -R ID-Partners/pf-agentic-identity -D vendor/
 ```
 
 or anonymously, one asset at a time:
 
 ```sh
-curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.6.1/SHA256SUMS
-curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.6.1/<asset>
+curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.7.0/SHA256SUMS
+curl -fsSLO https://github.com/ID-Partners/pf-agentic-identity/releases/download/v0.7.0/<asset>
 ```
 
 Then check every file against `SHA256SUMS` before you use it, and record what you took:
@@ -45,7 +45,7 @@ PingFederate 13.1.x; the v0.1.x releases, built for 13.0.x, are not published he
 release's assets into it, verified against `SHA256SUMS`, then build:
 
 ```sh
-image/stage-from-release.sh 0.6.1
+image/stage-from-release.sh 0.7.0
 docker build --target capability image/
 ```
 

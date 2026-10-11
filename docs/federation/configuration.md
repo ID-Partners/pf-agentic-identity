@@ -44,7 +44,7 @@ One of these happens, and each generated row says which, in bold, at the start o
 | Part of the federation | Pages |
 |---|---|
 | Trust anchors | [federation-runtime](../configuration/federation-runtime.md), [federation-entity](../configuration/federation-entity.md) (`OIDF_FEDERATION_TRUST_ANCHORS`) |
-| This entity | [federation-entity](../configuration/federation-entity.md), [federation-runtime](../configuration/federation-runtime.md) (`OIDF_FEDERATION_SUBORDINATE_CONSTRAINTS`) |
+| This entity and its signing keys | [federation-entity](../configuration/federation-entity.md) (`OIDF_FEDERATION_SIGNING_ALG`, `OIDF_FEDERATION_KEY_REFRESH_SECONDS`, `OIDF_FEDERATION_KEY_ACTIVATION_DELAY_SECONDS`), [federation-runtime](../configuration/federation-runtime.md) (`OIDF_FEDERATION_SUBORDINATE_CONSTRAINTS`) |
 | Fetching | [outbound-fetch](../configuration/outbound-fetch.md), [federation-entity](../configuration/federation-entity.md) (`OIDF_FEDERATION_IGNORE_SSL_ERRORS`, one setting for every reader, and its init-param `ignoreSslErrors`) |
 | Registration and its lifetime | [federation-runtime](../configuration/federation-runtime.md), [registration](../configuration/registration.md) (the init-params of `/federation/register` and the registration filters) |
 | Trust Marks and key history | [federation-runtime](../configuration/federation-runtime.md) |
@@ -78,7 +78,22 @@ What follows, part by part, is what the rows leave out.
 
 ## This entity
 
-- With `OIDF_FEDERATION_SUBORDINATES` set, PingFederate publishes fetch and list endpoints.
+- With `OIDF_FEDERATION_SUBORDINATES` set, or a subordinate pinned, PingFederate publishes fetch and list endpoints.
+- Each subordinate's Subordinate Statement carries the keys pinned for it, never the keys its own Entity
+  Configuration lists (since 0.7.0, finding F-0012). `OIDF_FEDERATION_SUBORDINATE_STORE` says where the pins are:
+  `settings` (the default) reads `OIDF_FEDERATION_SUBORDINATE_PINS`, written `{"<entity id>": {"jwks": {"keys":
+  [...]}, "entity_types": [...], "intermediate": true}}`; `database` keeps them in the authority's store (migration
+  V105), where the operator API asks for enrolments and changes and an operator approves them. Under production
+  every `OIDF_FEDERATION_SUBORDINATES` entry needs a pin, or the federation servlet is `FAILED_CONFIG` naming the ones
+  without; under development an entry with no pin is served with its live keys, with a WARN.
+  [Operations](operations.md#pinned-subordinates) has the enrolment.
+- The subordinate monitor and change control (since 0.7.0, plan item S7b): `OIDF_FEDERATION_SUBORDINATE_APPROVAL`
+  (`single`, or `two-person` to refuse an approval by the operator who asked), `OIDF_FEDERATION_SUBORDINATE_APPROVAL_TTL_SECONDS`
+  (604800: an operator's change not approved by then is withdrawn), `OIDF_FEDERATION_SUBORDINATE_ROLLOVER_HOLD_SECONDS`
+  (86400, 60 to 604800; production refuses less than 86400 under the database store: how long a rollover signed by a pinned key is held),
+  `OIDF_FEDERATION_SUBORDINATE_MONITOR_SECONDS` (240: how often each subordinate is looked at) and
+  `OIDF_FEDERATION_SUBORDINATE_UNREACHABLE_SECONDS` (900). [Operations](operations.md#subordinate-monitor-and-change-control)
+  has what each does.
 - `OIDF_FEDERATION_ATTESTER_JWKS` with a key that isn't public stops PingFederate starting because it would
   otherwise publish the key.
 - `OIDF_FEDERATION_SUBORDINATE_CONSTRAINTS` is written `{"max_path_length": 0, "naming_constraints": {"permitted":
@@ -102,7 +117,24 @@ status - goes through the outbound URL policy.
   `OIDF_AUTO_REGISTRATION_AUTHZ_ERROR_MODE` answer at the authorization endpoint, and JSON at PAR.
 - The init-params `subordinateStatementCacheMaxEntries`, `trustChainEntryMaxAgeSeconds` and
   `acceptedSigningAlgorithms` are read on `/federation/register` and both registration filters;
-  `trustControllerHost`, `trustControllerBaseUrl` and `signingAlgorithm` on `/federation/register` only.
+  `trustControllerHost` and `trustControllerBaseUrl` on `/federation/register` only.
+- The registration response is signed as the federation endpoints sign: `OIDF_FEDERATION_SIGNING_ALG`, with
+  PingFederate's current key for it. The `signingAlgorithm` init-params of `/federation/register` and of the
+  federation servlet were removed in 0.7.0, and either one set stops its servlet starting.
+
+## Signing keys
+
+- Every signer reads PingFederate's current key through one shared reader: the federation endpoints, the
+  registration response, the self-anchor's own keys and the SSF transmitter's SETs. RS256 and PS256 use
+  PingFederate's RSA key, ES256 its P-256 key and ES384 its P-384 key - the keys `/pf/JWKS` publishes.
+- A key is read again every `OIDF_FEDERATION_KEY_REFRESH_SECONDS` (default 30, 0 to 300). A read that fails keeps
+  the last key for at most 300 seconds more; after that, or with no key at all, signing answers 503.
+- `OIDF_SSF_SIGNING_ALGORITHM` is SSF's own choice from the same four, read through the same reader; its key never
+  enters the federation key history.
+- For `OIDF_FEDERATION_SIGNING_ALG` the key read is the cluster's active key, by its `kid`: a key PingFederate starts
+  publishing becomes active only after `OIDF_FEDERATION_KEY_ACTIVATION_DELAY_SECONDS` (default 3600, 0 to 86400),
+  and is in the Entity Configuration's `jwks` from the first tick that sees it
+  ([operations.md](operations.md#changing-pingfederates-signing-key)).
 
 ## Registration lifetime
 
@@ -117,7 +149,10 @@ status - goes through the outbound URL policy.
 
 ## Key history
 
-- The key history (`OIDF_FEDERATION_HISTORICAL_KEYS`) is kept in the authority's database, or in memory.
+- The key history and the key observations (`OIDF_FEDERATION_HISTORICAL_KEYS`) are kept in the authority's database
+  (V103, V104), or in each node's memory - which a clustered production node refuses.
+- `OIDF_FEDERATION_KEY_HISTORY_GRACE_SECONDS` must be at least the longest of every Trust Mark type's
+  `lifetime_seconds`, `OIDF_REGISTRATION_MAX_TTL_SECONDS` and 3600: shorter is FAILED_CONFIG under production.
 
 ## Hosted entities and the admin API
 

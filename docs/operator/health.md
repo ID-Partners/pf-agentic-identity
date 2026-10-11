@@ -11,7 +11,7 @@ item S8b; [operator-authentication.md](operator-authentication.md)).
 | `/agentic-identity/health/live` | none | 200 `{"status":"UP"}` while the webapp answers |
 | `/agentic-identity/health/ready` | none | 200 `{"status":"UP"}`, or 503 `{"status":"DOWN"}` |
 | `/agentic-identity/health` | an operator access token with `oidf.health.read` | the detail, with ready's status code |
-| `/agentic-identity/info` | the same | this repository's version, the commit (recorded by the build since 0.6.0, F-0190), PingFederate's and the JVM's |
+| `/agentic-identity/info` | the same | this repository's version, the commit (recorded by the build since 0.6.0, F-0190), PingFederate's and the JVM's; from 0.7.0 also `topology`: `mode`, `source`, `node_index`, `problem`, `client_storage` and `lease_backend` ([clustering.md](clustering.md#what-a-node-reports)) |
 
 ## Access
 
@@ -27,7 +27,7 @@ there and what they need, because the failed-attempt limit, not obscurity, is wh
 `OIDF_AUTHORITY_ADMIN_TOKEN` opens them in development only, with a WARN per request; in production it is never
 accepted, and while it is set the detail and info answer 503 like every operator route
 ([the static bearer](operator-authentication.md#the-static-bearer)). The second copy of the static-bearer rule that
-lived here, `HealthAccess`, is gone (finding F-0194).
+lived here, `HealthAccess`, is gone (finding [F-0194](../findings.md#f-0194)).
 
 Only GET and HEAD are served; any other method is 405 before a token is looked at. Every answer has
 `Cache-Control: no-store`. A war that bundles platform-pf without rs-validation - `gm-api.war` today - cannot load the
@@ -55,25 +55,31 @@ Things to know before routing on ready:
   `FAILED_DEPENDENCY` with its reason, its own surfaces answer 503 `temporarily_unavailable` or pass traffic that is
   not theirs on to PingFederate ([each surface's rule](components.md#each-surfaces-rule)), ready is 503, and live,
   `/pf/heartbeat.ping` and PingFederate's own SSO and OAuth endpoints keep answering. A failed `FAPI` closes only the
-  clients `OIDF_FAPI2_CLIENTS` names (F-0270). A load
+  clients `OIDF_FAPI2_CLIENTS` names ([F-0270](../findings.md#f-0270)). A load
   balancer that routes on ready takes such a node out; one that routes on live or on PingFederate's heartbeat keeps
   sending it traffic, and the component's own requests meet the 503. A component that failed on a dependency (an I/O,
-  SQL, timeout or linkage failure in its start - today, in practice, a file its start reads that is not there yet,
-  such as `OIDF_FEDERATION_ERROR_PAGE`; the stores are not contacted until the first request) is retried with backoff
-  from 5 s to 300 s and becomes ready by itself once the dependency is back; one that failed on configuration waits
-  for a restart.
+  SQL, timeout or linkage failure in its start - a file its start reads that is not there yet, such as
+  `OIDF_FEDERATION_ERROR_PAGE`, or, from 0.7.0, a store's database that does not answer the start-up schema check) is
+  retried with backoff from 5 s to 300 s and becomes ready by itself once the dependency is back; one that failed on
+  configuration waits for a restart.
+- **A store whose database is behind the release is `FAILED_CONFIG`** from 0.7.0 (plan item DB-4): the reason names
+  the migration family, the newest version the release ships and the newest the database records, and the
+  `oidf-db-migrate.jar` command; drift is `FAILED_CONFIG` under production, and a role that may not read
+  `oidf_schema_history` (or, for the SSF `ldm` dialect, `idm.schema_migration`) names the grant. Migrate, then
+  restart: `FAILED_CONFIG` is not retried. A database ahead of the release - a rolling upgrade's - starts, with one
+  WARN. [database-migrations.md](database-migrations.md#the-start-up-check) has the table.
 - **Every part starts at deploy.** Explicit registration, hosting, the admin API and the attester's issuance endpoint
   used to start on their first request, so ready did not see them until someone called them
-  (F-0193, closed by S9a). They now load at start-up, and so does the SSF receiver, after
+  ([F-0193](../findings.md#f-0193), closed by S9a). They now load at start-up, and so does the SSF receiver, after
   the transmitter that builds it (ST-5).
 - **A PingFederate that is its own trust anchor is ready before its keys are pinned** when automatic registration
   is switched off: `OIDF_AUTO_REGISTRATION_ENABLED=false` during the bootstrap. Explicit registration is then
   `DEGRADED` (it answers 503 until the keys are set), `FEDERATION` counts as ready, and the Entity Configuration the
-  keys are captured from serves through a load balancer that routes on ready (F-0192; seen
+  keys are captured from serves through a load balancer that routes on ready ([F-0192](../findings.md#f-0192); seen
   on the rig on 2026-09-30). With automatic registration switched on and no keys pinned, `AUTO_REGISTRATION` is
   `FAILED_CONFIG` and ready is 503.
 - **An SSF transmitter whose settings do not parse is `FAILED_CONFIG`** since 0.6.0 (ST5C,
-  F-0191, closed): server.log's ERROR "SSF transmitter NOT started: ..." names the setting,
+  [F-0191](../findings.md#f-0191), closed): server.log's ERROR "SSF transmitter NOT started: ..." names the setting,
   and ready is 503.
 - **Live is not PingFederate's heartbeat.** `/pf/heartbeat.ping` is PingFederate's own; live says only that this
   webapp answers. The image's HEALTHCHECK checks both (R-I3, 0.6.0), and not ready.

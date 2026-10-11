@@ -1,0 +1,153 @@
+# reference/single: one PingFederate on the production profile, PostgreSQL 17 over TLS only, and the jobs that make
+# the database ready before PingFederate starts. Run by ./up.sh, which generates everything under .local/<name>/ that
+# this file mounts and exports what it interpolates (reference/lib/common.sh); `docker compose config` works without
+# them, for the lint. Every port is the slot's and bound to 127.0.0.1. An example to read and adapt, not a deployment:
+# reference/README.md says which parts are example-only.
+name: ${REF_NAME:-ref-single}
+
+x-labels: &labels
+  owner: ${REF_OWNER:-pf-agentic-identity}
+  io.github.dphhyland.pf-agentic-identity.reference: single
+
+services:
+  postgres:
+    image: ${REF_POSTGRES_IMAGE:?}
+    container_name: ${REF_NAME:-ref-single}-postgres
+    labels: *labels
+    user: "0:0"
+    # The key is copied in as root and handed to postgres (PostgreSQL refuses a key another user owns or others can
+    # read); then the image's own entrypoint initialises the data directory and drops to postgres.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        install -o postgres -g postgres -m 600 /tls/postgres.key /var/lib/postgresql/server.key &&
+        install -o postgres -g postgres -m 644 /tls/postgres.crt /var/lib/postgresql/server.crt &&
+        exec docker-entrypoint.sh postgres -c ssl=on -c ssl_min_protocol_version=TLSv1.2
+        -c ssl_cert_file=/var/lib/postgresql/server.crt -c ssl_key_file=/var/lib/postgresql/server.key
+        -c hba_file=/etc/reference/pg_hba.conf -c password_encryption=scram-sha-256
+    environment:
+      POSTGRES_PASSWORD_FILE: /secrets/postgres-superuser
+      POSTGRES_DB: postgres
+    volumes:
+      - ${REF_LOCAL:-./.local}/tls/postgres.crt:/tls/postgres.crt:ro
+      - ${REF_LOCAL:-./.local}/tls/postgres.key:/tls/postgres.key:ro
+      - ${REF_LOCAL:-./.local}/secrets/postgres-superuser:/secrets/postgres-superuser:ro
+      - ../lib/pg_hba.conf:/etc/reference/pg_hba.conf:ro
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${PFAI_PORT_POSTGRES:-57111}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 40
+
+  # The roles and the database (lib/db-roles.sql), as the postgres superuser over verify-full TLS.
+  db-roles:
+    image: ${REF_POSTGRES_IMAGE:?}
+    container_name: ${REF_NAME:-ref-single}-db-roles
+    labels: *labels
+    depends_on:
+      postgres: { condition: service_healthy }
+    # As root (0:0, pinned rather than left to the image): it reads the host user's 0600 files, which an image
+    # user can read on Linux only by matching that uid. reference/README.md, "File ownership on Linux".
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        PGPASSWORD="$$(cat /secrets/postgres-superuser)" psql -q
+        "host=postgres dbname=postgres user=postgres sslmode=verify-full sslrootcert=/tls/ca.crt"
+        -f /etc/reference/db-roles.sql && echo "db-roles: oidf_migrator, pf_runtime and pf_clients ready in database oidf"
+    volumes:
+      - ${REF_LOCAL:-./.local}/tls/ca.crt:/tls/ca.crt:ro
+      - ${REF_LOCAL:-./.local}/secrets:/secrets:ro
+      - ../lib/db-roles.sql:/etc/reference/db-roles.sql:ro
+    restart: "no"
+
+  # oidf-db-migrate.jar as the migrator role: every family's migrations, the runtime role's grants, then validate.
+  db-migrate:
+    image: ${REF_JRE_IMAGE:?}
+    container_name: ${REF_NAME:-ref-single}-db-migrate
+    labels: *labels
+    depends_on:
+      db-roles: { condition: service_completed_successfully }
+    # As root (0:0, pinned rather than left to the image): it reads the host user's 0600 files, which an image
+    # user can read on Linux only by matching that uid. reference/README.md, "File ownership on Linux".
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/etc/reference/db-migrate.sh"]
+    environment:
+      OIDF_DB_MIGRATE_JDBC_URL: "jdbc:postgresql://postgres:5432/oidf?sslmode=verify-full&sslrootcert=/tls/ca.crt"
+      OIDF_DB_MIGRATE_USER: oidf_migrator
+      OIDF_DB_MIGRATE_PASSWORD_FILE: /secrets/oidf-migrator
+    volumes:
+      - ${REF_LOCAL:-./.local}/tls/ca.crt:/tls/ca.crt:ro
+      - ${REF_LOCAL:-./.local}/secrets/oidf-migrator:/secrets/oidf-migrator:ro
+      - ${REF_DB_MIGRATE_JAR:-./.local/oidf-db-migrate.jar}:/opt/oidf/oidf-db-migrate.jar:ro
+      - ../lib/db-migrate.sh:/etc/reference/db-migrate.sh:ro
+    restart: "no"
+
+  # The age identity and the SSF secret key, handed to PingFederate's user on a tmpfs it mounts read-only: a bind mount of the host's 0600
+  # file is unreadable to uid 9031 wherever the host's uid differs (a Linux runner). It stays up because a tmpfs
+  # volume lasts only while a container holds it - the cluster's bao agents do the same job from OpenBao.
+  pf-secrets:
+    image: ${REF_POSTGRES_IMAGE:?}
+    container_name: ${REF_NAME:-ref-single}-pf-secrets
+    labels: *labels
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - >-
+        install -o 9031 -g 0 -m 400 /secrets/age.key /run/oidf/age.key &&
+        install -o 9031 -g 0 -m 400 /secrets/ssf-secret-key /run/oidf/ssf-secret-key &&
+        echo 'pf-secrets: the age identity and the SSF secret key in place' && exec sleep 2147483647
+    volumes:
+      - ${REF_LOCAL:-./.local}/secrets/age.key:/secrets/age.key:ro
+      - ${REF_LOCAL:-./.local}/secrets/ssf-secret-key:/secrets/ssf-secret-key:ro
+      - pf-run:/run/oidf
+    healthcheck:
+      test: ["CMD", "test", "-s", "/run/oidf/ssf-secret-key"]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  pingfederate:
+    image: ${REF_IMAGE:-ref-single/pingfederate:local}
+    container_name: ${REF_NAME:-ref-single}-pf
+    labels: *labels
+    depends_on:
+      db-migrate: { condition: service_completed_successfully }
+      pf-secrets: { condition: service_healthy }
+    networks:
+      default:
+        # The issuer's host: only this network resolves it, and PingFederate listens on the slot's runtime port
+        # inside as well as out, so the issuer is one URL here and https://localhost:<port> from the host.
+        aliases: [pf.reference.test]
+    env_file:
+      # PING_IDENTITY_DEVOPS_USER / _KEY: each node fetches its own evaluation licence. Never read by these scripts.
+      - path: ${PING_DEVOPS_CONFIG:-${HOME}/.pingidentity/config}
+        required: false
+      - path: ../lib/pf-common.env
+      - path: ./pf.env
+    environment:
+      PF_ENGINE_PORT: ${PFAI_PORT_RUNTIME:-57105}
+      OIDF_SSF_ISSUER: ${REF_ISSUER:-https://pf.reference.test:57105}
+    volumes:
+      - ${REF_LOCAL:-./.local}/data.zip.age:/opt/reference/archive/data.zip.age:ro
+      - ${REF_LOCAL:-./.local}/tls/ca.crt:/opt/reference/tls/ca.crt:ro
+      - pf-run:/run/oidf:ro
+    ports:
+      - "127.0.0.1:${PFAI_PORT_RUNTIME:-57105}:${PFAI_PORT_RUNTIME:-57105}"
+      - "127.0.0.1:${PFAI_PORT_ADMIN:-57106}:9999"
+    # The image sets JAVA_RAM_PERCENTAGE=75.0 as the initial and the maximum heap, so the limit is the heap's size.
+    mem_limit: ${REF_PF_MEM_LIMIT:-1536m}
+
+volumes:
+  pgdata:
+    labels: *labels
+  pf-run:
+    labels: *labels
+    driver_opts: { type: tmpfs, device: tmpfs, o: "size=1m,mode=0755" }
+
+networks:
+  default:
+    labels: *labels

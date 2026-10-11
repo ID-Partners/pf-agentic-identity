@@ -1,10 +1,10 @@
 # The details a token carries, held to the attestation ceiling
 
 From 0.6.0 two checks hold what PingFederate issues to an attested client to the `authorization_details` its client
-attestation carries (plan item S4d, F-0032): an issuance criterion on your access-token
+attestation carries (plan item S4d, [F-0032](../findings.md#f-0032)): an issuance criterion on your access-token
 mappings, which sees the details before the token is made, and a response belt on the token endpoint, which reads them
 in the token response. The criterion also sends a bare refresh of a payment or account grant back to be decided again
-(F-0105).
+([F-0105](../findings.md#f-0105)).
 
 Why both. The ceiling used to be checked only against the token request's own `authorization_details` parameter, but
 the code, CIBA and device grants issue the details stored earlier - at PAR, at `/as/bc-auth.ciba`, at the device
@@ -36,7 +36,7 @@ enabled, as they already are for `ClientAttestationUtils.validateClientAttestati
 PingFederate hands the criterion `context.OAuthAuthorizationDetails`: one map per detail the token will carry - the
 request's on the client-credentials grant, what was stored on the code, CIBA and device grants, the grant's on a refresh
 without the parameter and the narrower ones on a refresh with it (driven on the rig with PingFederate 13.1.3,
-2026-09-30, U-0018). It also asks the mapping's criteria when the authorization endpoint
+2026-09-30, [U-0018](../findings.md#u-0018)). It also asks the mapping's criteria when the authorization endpoint
 resumes a code flow, where no attestation is ever sent.
 
 | The request | The criterion answers |
@@ -93,7 +93,7 @@ respective access token" - are known to be within the attestation's, by the same
   reason `too_large`.
 - An error, a body that is not JSON, and one with a `Content-Encoding` go out as they came. PingFederate 13.1.3
   compresses no token response: `Accept-Encoding` gzip, br, deflate or `*` over HTTP/2 and HTTP/1.1 got plain JSON with
-  its plain length on the rig (U-0029, 2026-09-30).
+  its plain length on the rig ([U-0029](../findings.md#u-0029), 2026-09-30).
 - A request without `OAuth-Client-Attestation` or its PoP passes untouched and unbuffered. One whose attestation the
   filter did not verify writes straight through.
 
@@ -103,6 +103,51 @@ store their tokens. A refused JWT access token stays valid until it expires, but
 grant is revoked. And RFC 9396 §7 lets an authorization server leave values out of the response ("The AS MAY omit
 values in the authorization_details to the client"), which the belt cannot see past; PingFederate 13.1.3 did not on the
 rig. Both are why the criterion is the control and the belt its fallback for a mapping without it.
+
+## A token exchange that requests an ID-JAG
+
+Neither check above can see an Identity Assertion JWT Authorization Grant. On a token exchange whose
+`requested_token_type` is `urn:ietf:params:oauth:token-type:id-jag`, PingFederate 13.1.3 calls neither the RAR
+processor's `validate` nor its `enrich`, and writes the request's `authorization_details` into the ID-JAG it signs when
+the SP connection's mapping wrote none ([F-0325](../findings.md#f-0325), `javap -c` of pf-protocolengine 13.1.3.0,
+re-read 2026-10-05). The ID-JAG is SP-connection output, not an access-token mapping, so the criterion never runs. The
+token response may carry the details too (`generate` builds it from the signed grant's claim; not traced further), but
+the belt reads only an attested client's response and holds it to the attestation's ceiling, never to the type's model
+or the PDP. For an unattested client nothing would hold them to anything.
+
+draft-ietf-oauth-identity-assertion-authz-grant-04 (21 May 2026) §4.3.3 lets an ID-JAG carry them only as policy
+decided: "If authorization_details is present, the IdP MUST parse it as a JSON array and process each authorization
+detail object according to [RFC9396].  The IdP evaluates policy for each authorization detail and determines which
+authorization details to include in the issued ID-JAG." PingFederate reaches the PDP only from `enrich`, which this
+path skips, so validating the details in front of it would still leave no policy decision behind what it signs.
+
+So from 0.7.0 the `IdJagDetails` filter on `/as/token.oauth2` refuses a token exchange that requests an ID-JAG and
+carries `authorization_details` - in the body or the query, blank included, whatever the client and however it
+authenticates - with `400 invalid_authorization_details` (RFC 9396 §6: "the AS refuses the request with the error code
+invalid_authorization_details (similar to invalid_scope)"). It has no switch and is the same in every deployment
+profile. A token exchange for an ID-JAG without them, and any other token request, passes untouched. A deployment that
+needs details in its ID-JAGs writes them in the SP connection's ID-JAG claim mapping, from a source it trusts:
+PingFederate copies the request's only when that mapping holds none.
+
+Each refusal is `idjag.details.refused` in pf-integration's `idjag` catalogue, audited, with the client the request
+names as its subject (unverified: the filter runs before PingFederate authenticates it) and `detail_types`, at most
+eight types and never a value.
+
+Driven on the rig (pf-p4-t5a, PingFederate 13.1.3.0, this branch's modules) on 2026-10-05, as the confidential client
+`conformance-ssf-emitter`: an ID-JAG token exchange carrying a `payment_initiation` detail with an undeclared field was
+400 `invalid_authorization_details` from the filter, and so was one carrying `[]` in the query; the same exchange
+without details, and an access-token exchange with them, went on to PingFederate, which answered 400
+`unauthorized_client` (the client may not use token exchange); a client-credentials request was issued as before.
+server.log:
+
+```
+event=idjag.details.refused outcome=failure reason=invalid_authorization_details subject=conformance-ssf-emitter detail_types=payment_initiation
+event=idjag.details.refused outcome=failure reason=invalid_authorization_details subject=conformance-ssf-emitter detail_types=none
+```
+
+The rig configures no SP connection with ID-JAG enabled, so PingFederate issuing an ID-JAG was not driven
+([U-0335](../findings.md#u-0335)); the filter refuses the request before PingFederate reads it, whatever it would
+have issued.
 
 ## Events
 

@@ -10,14 +10,14 @@ outside is in [health.md](health.md).
 
 | Component | Switch | What it serves | Settings that make it "present" |
 |---|---|---|---|
-| `FEDERATION` | `OIDF_FEDERATION_ENABLED` | the Entity Configuration, fetch, list, resolve, Trust Mark and historical-keys endpoints, explicit registration (`/federation/register`) | `OIDF_FEDERATION_TRUST_ANCHORS`, `OIDF_FEDERATION_SUBORDINATES`, `OIDF_FEDERATION_TRUST_ANCHOR_JWKS`, `OIDF_FEDERATION_SELF_ANCHOR`, `OIDF_FEDERATION_TRUST_MARK_TYPES`, `OIDF_FEDERATION_ENDPOINT_AUTH` |
+| `FEDERATION` | `OIDF_FEDERATION_ENABLED` | the Entity Configuration, fetch, list, resolve, Trust Mark and historical-keys endpoints, explicit registration (`/federation/register`) | `OIDF_FEDERATION_TRUST_ANCHORS`, `OIDF_FEDERATION_SUBORDINATES`, `OIDF_FEDERATION_TRUST_ANCHOR_JWKS`, `OIDF_FEDERATION_SELF_ANCHOR`, `OIDF_FEDERATION_TRUST_MARK_TYPES`, `OIDF_FEDERATION_ENDPOINT_AUTH`, `OIDF_FEDERATION_SUBORDINATE_STORE`, `OIDF_FEDERATION_SUBORDINATE_PINS` |
 | `AUTO_REGISTRATION` | `OIDF_AUTO_REGISTRATION_ENABLED` | automatic registration at `/as/token.oauth2`, `/as/authorization.oauth2` and `/as/par.oauth2` | `OIDF_FEDERATION_TRUST_CONTROLLER_HOST`, `OIDF_FEDERATION_TRUST_CONTROLLER_BASE_URL`, `OIDF_AUTO_REGISTRATION_FAIL_CLOSED`, `OIDF_AUTO_REGISTRATION_FRONT_CHANNEL` |
 | `ATTESTATION_AUTH` | `OIDF_ATTESTATION_AUTH_ENABLED` | `attest_jwt_client_auth` at the token and PAR endpoints | `OIDF_BRIDGE_SIGNER_BACKING`, `OIDF_BRIDGE_SIGNING_KEYS`, `OIDF_ATTESTATION_REQUIRE_ATTESTER_BINDING`, `OIDF_ATTESTATION_REQUIRE_HOSTED_AGENT` |
 | `ATTESTATION_ISSUER` | `OIDF_ATTESTATION_ISSUER_ENABLED` | the client attester's `/federation/attestation` | `OIDF_ATTESTER_SIGNING_JWK`, `OIDF_ATTESTER_FEDERATION_ENTITY`, `OIDF_ATTESTER_OP_ISSUER`, `OIDF_ATTESTER_CIMD_URL`, `OIDF_ATTESTER_SPIRE_ENTRIES_URL` |
 | `HOSTING` | `OIDF_HOSTING_ENABLED` | hosted subordinates, `/federation/agents/*` and `/federation/resources/*` | `OIDF_AUTHORITY_ENTITY_ID`, `OIDF_AUTHORITY_JDBC_URL`, `OIDF_AUTHORITY_DATA_STORE_ID`, `OIDF_OPENBAO_URL` |
 | `SSF` | `OIDF_SSF_ENABLED` | the Shared Signals transmitter | `OIDF_SSF_ISSUER`, `OIDF_SSF_JDBC_URL`, `OIDF_SSF_DATA_STORE_ID` |
 | `SSF_RECEIVER` | `OIDF_SSF_RECEIVER_ENABLED` | the Shared Signals receiver | `OIDF_SSF_RECEIVER_EXPECTED_ISSUER`, `OIDF_SSF_RECEIVER_JWKS_URL`, `OIDF_SSF_RECEIVER_POLL_URL` |
-| `OPERATOR_API` | `OIDF_OPERATOR_API_ENABLED` | the federation operator API, `/federation/admin/*` | `OIDF_AUTHORITY_ADMIN_TOKEN` |
+| `OPERATOR_API` | `OIDF_OPERATOR_API_ENABLED` | the federation operator API, `/federation/admin/*` | `OIDF_OPERATOR_AUDIENCE`, `OIDF_OPERATOR_BASE_URL`, `OIDF_OPERATOR_AUTH_MODE`, `OIDF_OPERATOR_JWKS_URL`, `OIDF_OPERATOR_INTROSPECTION_ENDPOINT` (from 0.7.0; not the static bearer `OIDF_AUTHORITY_ADMIN_TOKEN`, which production refuses whatever the switch says but `false`) |
 | `FAPI` | `OIDF_FAPI_ENABLED` | FAPI 2.0 enforcement for the clients it names | `OIDF_FAPI2_CLIENTS` |
 
 The lists are the same as each switch's description in
@@ -34,8 +34,21 @@ and leaves `OIDF_HOSTING_ENABLED` unset has `HOSTING` `FAILED_CONFIG` in product
 The SSF switches apply as the others do from ST-5 (package ST5C): the transmitter and the receiver start through
 their parts (servlets/ssf/README.md), so `OIDF_SSF_ENABLED=false` disables SSF
 and its servlets answer 404, and `OIDF_SSF_RECEIVER_ENABLED=false` keeps the transmitter from building the receiver
-(F-0271). The receiver runs inside the transmitter: with SSF off, a receiver switched on
-is `FAILED_CONFIG`.
+([F-0271](../findings.md#f-0271)). The receiver runs inside the transmitter: with SSF off, a receiver switched on
+is `FAILED_CONFIG`. The other way round, from 0.7.0, a refusal of the receiver's own settings costs the receiver alone
+([F-0363](../findings.md#f-0363)): a receiver-only setting that does not parse, or that the production profile refuses
+when it is read from an `init-param`, and a combination of the receiver's settings that does not hold (a client without
+its token endpoint, a push endpoint without a managed stream), leave `SSF` `READY` and `SSF_RECEIVER` `FAILED_CONFIG`
+(`REFUSED` for the profile's refusal), naming the setting. The receiver's JWKS is a start dependency
+([F-0331](../findings.md#f-0331)): unreachable at start, `SSF_RECEIVER` is `FAILED_DEPENDENCY`, naming the URL, and
+the supervisor tries again; unreachable once it is ready, it is `DEGRADED` until a fetch succeeds. And
+`OIDF_SSF_KAFKA_ENABLED=true` with a Kafka publisher that cannot be built stops the transmitter
+([F-0332](../findings.md#f-0332)): `FAILED_CONFIG`, or `FAILED_DEPENDENCY` for an I/O cause, its reason naming Kafka.
+
+A violation of the production profile refuses the components that read the setting, not every component of its
+catalogue ([F-0297](../findings.md#f-0297); settings-catalogue.md
+lists each governed entry's): `OIDF_PDP_FAIL_OPEN=true` without its risk refuses `FEDERATION`, `AUTO_REGISTRATION` and
+`HOSTING`, never `ATTESTATION_AUTH`, and an http `OIDF_SSF_RECEIVER_POLL_URL` refuses `SSF_RECEIVER` alone.
 
 ## How a switch is read
 
@@ -122,7 +135,7 @@ filter now lets the logout go on whatever the extraction meets.
 finished its start is not half-configured whatever a sibling did. On the rig on 2026-09-30, a PingFederate that names
 itself trust controller before its anchor's keys are pinned had explicit registration unable to start while
 `OpenIdFederationServlet` was `READY`; gating on the component would have closed the Entity Configuration that those
-keys are captured from (F-0192). From S9b explicit registration without the anchor's keys
+keys are captured from ([F-0192](../findings.md#f-0192)). From S9b explicit registration without the anchor's keys
 is `DEGRADED` - "`OIDF_FEDERATION_TRUST_ANCHOR_JWKS` is unset (and no `OIDF_FEDERATION_SELF_ANCHOR`): explicit
 registration answers 503 until the trust anchor's keys are configured" - so `FEDERATION` is ready while the rest of it
 serves, and each registration answers 503.
@@ -158,7 +171,7 @@ cannot say.
 
 **The FAPI filter** decides FAPI's traffic from its client list, which it reads as its start does - the system
 property `oidf.fapi2.clients`, then `OIDF_FAPI2_CLIENTS` - so a failed FAPI closes only the clients it names and
-PingFederate's other clients keep their token endpoint (F-0270). A list that names every
+PingFederate's other clients keep their token endpoint ([F-0270](../findings.md#f-0270)). A list that names every
 client (`*`), an assertion whose owner cannot be read, and a list that cannot be read make every request FAPI's.
 
 **The OGNL criteria** run on PingFederate's engine classloader, whose copy of platform is not the webapp's: statics are
@@ -169,7 +182,7 @@ enable switch (off, or a value that is not `true` or `false`, is not serving), t
 the webapp's sweep read). Otherwise the criterion runs, and its own lazily built state - the trust anchors, the
 containment models, the attesters - refuses the token when it cannot be built, as before. The engine's copy cannot
 learn that the webapp's part failed on a dependency, or on a configuration its start alone reads: it has no
-supervisor and no view of the webapp (F-0345). A criterion that answers `false` - or throws
+supervisor and no view of the webapp ([F-0345](../findings.md#f-0345)). A criterion that answers `false` - or throws
 - denies the token with PingFederate's 400 `invalid_grant` and the criterion's Error Result as `error_description`
 (the rig, 2026-09-30, below), and `CriterionGate` logs why once per component at WARN, then at DEBUG.
 `delegationActChain` has no gate of its own: the acting party's `agent_id` and attester come through
@@ -199,7 +212,8 @@ code for an endpoint that is not there, so a disabled one answers 404 with no bo
 zero and a ceiling that starts at 5 s and doubles to 300 s (full jitter, so a fleet that lost the same dependency does
 not come back in step). Before each attempt the part moves to `STARTING`; the attempt runs the same start function
 as `init` and records its outcome. A part retried to `READY` stops being retried; one that fails on configuration
-stops too. `FAILED_CONFIG` and `REFUSED` are never retried: a restart or a configuration change fixes them. Each
+stops too. `FAILED_CONFIG` and `REFUSED` are never retried: a restart or a configuration change fixes them
+([when a setting takes effect](../configuration/README.md#when-a-setting-takes-effect)). Each
 attempt counts in `oidf_component_retries_total{component}`. Only the webapp's copy of platform schedules a retry
 (classloaders, rule 2); in any other copy a part that failed on a dependency keeps
 that state until it starts again.
@@ -215,7 +229,7 @@ at boot - gets no grace ([health.md](health.md#what-ready-means)).
 ## Every part starts at deploy
 
 Four servlets used to start on their first request, so readiness did not see them until someone called them
-(F-0193): `OpenIdRegistrationServlet`, `HostedEntityServlet`, `FederationAdminServlet`
+([F-0193](../findings.md#f-0193)): `OpenIdRegistrationServlet`, `HostedEntityServlet`, `FederationAdminServlet`
 and `AttestationIssuanceServlet`. They are now `loadOnStartup = 1`. The alternative - a separate class that
 registers their parts at deploy while the servlets still start lazily - would split a part's registration from the
 start function the supervisor retries, and leave a window in which the part says `READY` for a servlet that has not
@@ -228,11 +242,11 @@ receiver.
 
 What PingFederate 13.1.3's Jetty does with an `init` that throws, the three cases S9a had to know:
 
-1. **A load-on-startup servlet** (2026-09-27, U-0023): the merged `pf-runtime.war` fails
+1. **A load-on-startup servlet** (2026-09-27, [U-0023](../findings.md#u-0023)): the merged `pf-runtime.war` fails
    whole. With `OIDF_FEDERATION_TRUST_ANCHORS` unset, `OpenIdFederationServlet`'s init threw; Jetty ee9 logged
    "Failed startup of context" for pf-runtime.war and every runtime endpoint on 9031 answered 503, while the admin
    console on 9999 answered 200.
-2. **A filter** (2026-09-29, main at a5a2d49e, the rig on its own ports, U-0281): the same. With no trust controller
+2. **A filter** (2026-09-29, main at a5a2d49e, the rig on its own ports, [U-0281](../findings.md#u-0281)): the same. With no trust controller
    configured, `FrontChannelAutoRegistrationFilter.init` threw, and server.log said:
 
    ```
@@ -243,7 +257,7 @@ What PingFederate 13.1.3's Jetty does with an `init` that throws, the three case
    ```
 
 3. **A servlet that is not load-on-startup** (2026-09-30, main at a5a2d49e, the rig's own configuration, which names
-   no authority, U-0280): only that servlet fails, and the rest of the war keeps serving. The first
+   no authority, [U-0280](../findings.md#u-0280)): only that servlet fails, and the rest of the war keeps serving. The first
    `GET /federation/agents/probe-1` ran `HostedEntityServlet.init`, which threw "HostedEntityServlet requires
    'authorityEntityId'"; Jetty logged it at WARN against the request, PingFederate's error servlet logged "Top level
    error", and the request answered 500 with PingFederate's error page. Every later request to that path answered
@@ -270,7 +284,7 @@ while one whose `client_id` is an https URL answered 503 `{"error":"temporarily_
 "AUTO_REGISTRATION is not available"}`. `FEDERATION` was `FAILED_CONFIG` too, from explicit registration (the
 trust controller names no pinned anchor keys), and `OpenIdFederationServlet` stayed `READY`. Left unset in
 production, the rig's `OIDF_FAPI2_CLIENTS` makes `FAPI` `FAILED_CONFIG` and every token request answers 503
-(the same boot with only the two switches unset): S9a's FAPI floor was every request (F-0270);
+(the same boot with only the two switches unset): S9a's FAPI floor was every request ([F-0270](../findings.md#f-0270));
 from S9b a failed FAPI closes only the clients its list names (below).
 
 **Each surface's rule, on the rig** (2026-09-30, this repository at 428acf93, slot 1, PingFederate 13.1.3.0 on java
@@ -342,4 +356,4 @@ mapping was the running rig's, set through the admin API and gone with the conta
 Before this change, on the same rig at origin/main cf5b8bce: a criterion that returns `false` (`1 == 2`) and one that
 throws both denied the token with 400 `invalid_grant` and the criterion's Error Result - PingFederate's code, not
 `access_denied`; and `validateClientAttestation`'s own containment check held on the engine's classloader
-(U-0110).
+([U-0110](../findings.md#u-0110)).

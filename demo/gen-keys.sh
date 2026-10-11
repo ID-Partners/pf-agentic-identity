@@ -11,6 +11,13 @@
 # with suite/suite-compose.yml, and secrets.env: the test user's password and two client secrets (the SSF
 # introspection client's and the event operator's). Nothing written here is committed.
 #
+# And PingFederate's own runtime certificate (F-0362): a CA, pf-runtime-tls-ca, and a leaf, pf-runtime-tls,
+# naming localhost, host.docker.internal, $PF_RIG_NAME and the host of $PF_BASE_URL, which terraform/
+# runtime-tls.tf imports as the runtime (and admin) server certificate, with the CA in PingFederate's trusted CAs. A
+# module in PingFederate that calls PingFederate at its own issuer then checks the host name against a certificate
+# that carries it, with no JDK switch. The leaf is reissued when the names
+# change - another rig name or issuer - and kept otherwise; the CA is kept.
+#
 # Idempotent: an existing key or secret is kept, because regenerating one silently invalidates the
 # archive already exported with its public half in it. Delete keys/ or secrets.env to rotate, then
 # re-apply terraform and re-export.
@@ -86,6 +93,41 @@ else
   echo "generated keys/suite-tls-* (a CA and the suite's certificate)"
 fi
 
+# --- PingFederate's runtime certificate (F-0362) ---
+RIG_NAME="${PF_RIG_NAME:-pf-agentic-identity}"
+BASE_HOST="${PF_BASE_URL:-https://localhost:9031}"; BASE_HOST="${BASE_HOST#https://}"; BASE_HOST="${BASE_HOST%%/*}"
+BASE_HOST="${BASE_HOST%:*}"
+SANS="$(printf '%s\n' localhost host.docker.internal "$RIG_NAME" "$BASE_HOST" | awk 'NF && !seen[$0]++ { print (/^[0-9.]+$/ ? "IP:" : "DNS:") $0 }' | paste -sd, -)"
+if [[ -f "$KEYS/pf-runtime-tls-ca.crt" ]]; then
+  echo "kept      keys/pf-runtime-tls-ca.*"
+else
+  ( umask 177; cd "$KEYS"
+    openssl req -x509 -newkey rsa:2048 -nodes -days 397 -keyout pf-runtime-tls-ca.key -out pf-runtime-tls-ca.crt \
+      -subj "/CN=pf-agentic-identity rig runtime CA" \
+      -addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign,cRLSign >/dev/null 2>&1 )
+  chmod 644 "$KEYS/pf-runtime-tls-ca.crt"
+  rm -f "$KEYS/pf-runtime-tls.sans"
+  echo "generated keys/pf-runtime-tls-ca.* (the rig's runtime CA)"
+fi
+if [[ -f "$KEYS/pf-runtime-tls.p12" && "$(cat "$KEYS/pf-runtime-tls.sans" 2>/dev/null)" == "$SANS" ]]; then
+  echo "kept      keys/pf-runtime-tls.* ($SANS)"
+else
+  ( umask 177; cd "$KEYS"
+    openssl req -new -newkey rsa:2048 -nodes -keyout pf-runtime-tls.key -subj "/CN=$RIG_NAME" -out pf-runtime-tls.csr >/dev/null 2>&1
+    printf 'subjectAltName=%s\nextendedKeyUsage=serverAuth\nkeyUsage=critical,digitalSignature,keyEncipherment\nbasicConstraints=critical,CA:FALSE\n' "$SANS" > pf-runtime-tls.ext
+    openssl x509 -req -in pf-runtime-tls.csr -CA pf-runtime-tls-ca.crt -CAkey pf-runtime-tls-ca.key -CAcreateserial -days 397 \
+      -extfile pf-runtime-tls.ext -out pf-runtime-tls.crt >/dev/null 2>&1
+    # The PKCS#12 password is not a secret worth the name - the key is a rig's and the file never leaves keys/ - but
+    # PingFederate's import wants one; terraform reads it from secrets.env.
+    openssl rand -hex 16 > pf-runtime-tls.p12.pass
+    openssl pkcs12 -export -inkey pf-runtime-tls.key -in pf-runtime-tls.crt -certfile pf-runtime-tls-ca.crt \
+      -name pf-runtime-tls -passout file:pf-runtime-tls.p12.pass -out pf-runtime-tls.p12
+    printf '%s' "$SANS" > pf-runtime-tls.sans
+    rm -f pf-runtime-tls.csr pf-runtime-tls.ext pf-runtime-tls-ca.srl )
+  chmod 644 "$KEYS/pf-runtime-tls.crt"
+  echo "generated keys/pf-runtime-tls.* ($SANS)"
+fi
+
 SECRETS="$HERE/secrets.env"
 if [[ -f "$SECRETS" ]]; then
   echo "kept      secrets.env"
@@ -106,3 +148,8 @@ if ! grep -q '^TF_VAR_ssf_emitter_client_secret=' "$SECRETS"; then
   ( umask 177; echo "TF_VAR_ssf_emitter_client_secret=$(openssl rand -base64 36 | tr -d '/+=\n' | cut -c1-40)" >> "$SECRETS" )
   echo "added     TF_VAR_ssf_emitter_client_secret to secrets.env"
 fi
+# The runtime certificate's PKCS#12 password follows the file: rewritten whenever the certificate was reissued.
+( umask 177
+  grep -v '^TF_VAR_pf_runtime_tls_password=' "$SECRETS" > "$SECRETS.tmp" || true
+  echo "TF_VAR_pf_runtime_tls_password=$(cat "$KEYS/pf-runtime-tls.p12.pass")" >> "$SECRETS.tmp"
+  mv "$SECRETS.tmp" "$SECRETS" )

@@ -367,7 +367,7 @@ granted* (`authorization_details`) — with the key binding (`cnf`) preventing u
 
 ### 4.6 Errors
 
-Errors use HTTP 400 (or the status noted: 401, 403, 500 or 503) with:
+Errors use HTTP 400 (or the status noted: 401, 403, 429, 500 or 503) with:
 
 ```json
 { "error": "instance_not_authorized", "error_description": "spiffe://prod.example/agent-x is not bound to client https://client.example" }
@@ -384,6 +384,7 @@ Errors use HTTP 400 (or the status noted: 401, 403, 500 or 503) with:
 | `access_denied` | The requested `authorization_details` exceed the permitted ceiling. (403) |
 | `server_error` | Internal failure. (500) |
 | `temporarily_unavailable` | The CAS cannot check the request now - for example, the store that tracks challenges, proof `jti`s or bindings does not answer - and the client may retry later. (503) |
+| `temporarily_unavailable` | The caller has sent more requests than the CAS accepts from it in a period ([RFC6585] Section 4: "The 429 status code indicates that the user has sent too many requests in a given amount of time"). The response SHOULD carry `Retry-After`. (429) |
 
 ---
 
@@ -730,6 +731,7 @@ Nothing owned by [ABCA] is re-registered: `oauth-client-attestation+jwt`, the Po
 
 - **[RFC2119] / [RFC8174]** — Key words for use in RFCs.
 - **[RFC6749]** — The OAuth 2.0 Authorization Framework.
+- **[RFC6585]** - Additional HTTP Status Codes (429 Too Many Requests).
 - **[RFC7515] / [RFC7517] / [RFC7519] / [RFC7638]** — JWS, JWK, JWT, JWK Thumbprint.
 - **[RFC7800]** — Proof-of-Possession Key Semantics for JWTs (`cnf`).
 - **[RFC9396]** — OAuth 2.0 Rich Authorization Requests.

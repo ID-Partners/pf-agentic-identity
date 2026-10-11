@@ -23,7 +23,7 @@ The static bearer `OIDF_AUTHORITY_ADMIN_TOKEN` is development's escape and nothi
    | `oidf.admin.subordinates.approve` | approve a pending subordinate, apart from managing them, so two people can hold the two |
    | `oidf.admin.clients.read` | read the registered clients |
    | `ssf.admin` | the Shared Signals transmitter's administration |
-   | `oidf.metrics.read` | read `/metrics` |
+   | `oidf.metrics.read` | scrape `/agentic-identity/metrics` ([metrics.md](metrics.md)) |
    | `oidf.health.read` | read the health detail and `/agentic-identity/info` |
 
 2. **An access token manager whose tokens name the operator APIs as their audience.** A JWT manager: set its
@@ -52,9 +52,11 @@ The `operator-auth` catalogue, `libs/platform-pf/src/main/resources/META-INF/oid
 | `OIDF_OPERATOR_INSECURE_TLS` | `false` | trust any certificate on the JWKS and introspection calls; forbidden in production |
 | `OIDF_OPERATOR_AUTH_FAILURES_PER_MINUTE` | 10 | failed authentications one client address may make in a minute |
 | `OIDF_OPERATOR_MUTATIONS_PER_MINUTE` | 60 | changes one operator may make in a minute |
+| `OIDF_OPERATOR_DPOP_NONCE` | `true` | a DPoP proof must carry a nonce the operator APIs issued ([DPoP nonces](#dpop-nonces), from 0.7.0); `false` is forbidden in production |
 
 A configuration that cannot authenticate anyone - no audience, no base URL, no key source for its mode, insecure TLS
-in production, or no Redis in production without the `in-memory-state` accepted risk - does not stop PingFederate
+in production, `OIDF_OPERATOR_DPOP_NONCE=false` in production, or no Redis in production without the
+`in-memory-state` accepted risk - does not stop PingFederate
 starting: the authenticator logs the reason once at WARN and answers every request 503.
 
 **A JWKS or introspection endpoint under a private CA.** The JWKS and introspection calls trust what the JVM's default
@@ -62,7 +64,7 @@ TLS trust trusts, and inside PingFederate 13.1.3 that is PingFederate's Trusted 
 `-Djavax.net.ssl.trustStore` is not honoured, and a CA imported through the admin API counts only after a restart.
 Import the CA as a PingFederate Trusted CA, in the configuration archive or through the admin API followed by a
 restart. Seen on the conformance rig in production on 2026-10-01 by the v0.6.0 release package
-(U-0321).
+([U-0321](../findings.md#u-0321)).
 
 `OIDF_OPERATOR_BASE_URL` is configured rather than read from the request on purpose: the `Host` header is the
 caller's to choose, so a proof checked against a URL built from it proves nothing about where the caller meant to
@@ -119,10 +121,39 @@ and `/ready` stay open:
 | `GET /agentic-identity/health` | `oidf.health.read` | `health.detail` |
 | `GET /agentic-identity/info` | `oidf.health.read` | `health.info` |
 
-The other scopes have no route in this release: `oidf.admin.subordinates` and `oidf.admin.subordinates.approve`
-(no subordinate administration API is served from this repository), `ssf.admin` (every SSF path is a receiver's own
-stream or a provisioner's, on SSF's own scopes - `SsfRoutes` in servlets/ssf), and `oidf.metrics.read` (`/metrics`
-is not served yet). The RAR models' fingerprint is not served over HTTP at all. The tests `OperatorApiRoutesTest`,
+The metrics endpoint (MetricsServlet in platform-pf; `MetricsServlet.ROUTES`, since 0.7.0), a scrape route: a success
+emits `admin.request.authorised` but is not written to PingFederate's audit log, because a scrape every few seconds
+would flood it; a refusal is audited as on every route ([metrics.md](metrics.md#authentication)):
+
+| Method and path | Scope | Route |
+|---|---|---|
+| `GET`, `HEAD /agentic-identity/metrics` | `oidf.metrics.read` | `metrics.read` |
+
+It is the one route that, in production, takes a token bound to nothing: only from a client `OIDF_METRICS_CLIENT_IDS`
+names, and only with `oidf.metrics.read`, for a scraper such as Prometheus that can do neither DPoP nor a certificate
+binding PingFederate 13.x can issue ([metrics.md](metrics.md#authentication), U-0566). Every other route, and this one
+for any other client, refuses an unbound token.
+
+The Shared Signals transmitter's operator API (SsfAdminServlet in servlets/ssf; `OperatorApi.SSF_ADMIN`, since 0.7.0,
+plan item S10c). The servlet parses the path within `/ssf/admin/streams` to the operation before it looks at a token,
+since the stream id sits inside the path, and answers 404 for anything else:
+
+| Method and path | Scope | Route |
+|---|---|---|
+| `GET /ssf/admin/streams/{id}` | `ssf.admin` | `ssf-admin.streams.read` |
+| `POST /ssf/admin/streams/{id}:pause` | `ssf.admin` | `ssf-admin.streams.pause` |
+| `POST /ssf/admin/streams/{id}:resume` | `ssf.admin` | `ssf-admin.streams.resume` |
+| `POST /ssf/admin/streams/{id}/sets:retry-dead` | `ssf.admin` | `ssf-admin.streams.retry-dead` |
+
+`oidf.admin.subordinates` asks to enrol and re-pin subordinates, removes them, and withdraws a change it asked for
+(`POST /federation/admin/subordinates`, `/subordinates/keys`, `/subordinates/remove`, `/subordinates/changes/withdraw`,
+routes `federation-admin.subordinates.enrol`, `.keys`, `.remove` and `.withdraw`, since 0.7.0);
+`oidf.admin.subordinates.approve` approves or rejects a waiting change (`POST /subordinates/changes/approve`,
+`/subordinates/changes/reject`, routes `.approve` and `.reject`), kept apart so two people can hold the two scopes -
+with `OIDF_FEDERATION_SUBORDINATE_APPROVAL=two-person` the operator who asked cannot approve, compared by `sub`;
+reading them (`GET /subordinates`, `/subordinates/audit`, `/subordinates/changes`) takes `oidf.admin.read`.
+
+Every scope has a route in this release. The RAR models' fingerprint is not served over HTTP at all. The tests `OperatorApiRoutesTest`,
 `HealthServletTest` and `SsfRoutesTest` read every `@WebServlet` mapping in their modules and fail on a path or method
 that has no route and is not listed as not being one.
 
@@ -143,7 +174,7 @@ init-param - is the one static credential left, and one rule, in `OperatorAuthen
   instead of believing it still protects something. Its catalogue entry is classed `forbidden-in-production`.
 
 The health endpoints used to hold a second copy of this rule (`HealthAccess`, finding
-F-0194); it is gone, as is pf-integration's `AdminBearer`.
+[F-0194](../findings.md#f-0194)); it is gone, as is pf-integration's `AdminBearer`.
 
 device-enrolment, which enrols agents through `POST /federation/agents`, gets a DPoP-bound client-credentials token
 of its own (`PF_AUTHORITY_CLIENT_ID`, see docs/configuration/device-enrolment.md); its `PF_AUTHORITY_ADMIN_TOKEN` is
@@ -164,9 +195,11 @@ In this order; the first that fails decides the answer.
 3. **The binding.** A token whose `cnf` has `jkt` needs a DPoP proof, checked by rs-validation and oidf-jose's
    `DpopProofValidator` against RFC 9449's list. The key's thumbprint must equal `cnf.jkt`, `htm` must equal the
    request's method exactly, `htu` must be the base URL plus the path, `ath` must be this token's hash, and the
-   `jti` must not have been seen before. A token whose `cnf` has `x5t#S256` is accepted where the servlet container
-   presents the client certificate it names (RFC 8705 §3). A token bound to nothing is refused in production;
-   development accepts it with a WARN.
+   `jti` must not have been seen before. With `OIDF_OPERATOR_DPOP_NONCE` on, the proof must carry a nonce this server
+   issued ([DPoP nonces](#dpop-nonces)). A token whose `cnf` has `x5t#S256` is accepted where the servlet container
+   presents the client certificate it names (RFC 8705 §3). A token bound to nothing is refused in production, except
+   on the metrics scrape route from a client `OIDF_METRICS_CLIENT_IDS` names (counted, logged at DEBUG); development
+   accepts it with a WARN.
 4. **The actor.** The token's `sub`, or its `client_id` when it has no subject. Never a header: `X-Federation-Actor`
    is recorded only as the event's `claimed_label`, cut to 128 characters and made safe for a log.
 5. **The scope.** The route's scope must be among the token's.
@@ -178,7 +211,7 @@ and confirm that the public key to which the access token is bound matches the p
 RFC 9449 §4.2 defines `ath`: "Hash of the access token. The value MUST be the result of a base64url encoding (as
 defined in Section 2 of [RFC7515]) the SHA-256 [SHS] hash of the ASCII encoding of the associated access token's
 value." RFC 9110 §9.1: "The method token is case-sensitive", so a proof for `get` is not a proof for `GET`
-(finding F-0226, fixed in this release).
+(finding [F-0226](../findings.md#f-0226), fixed in this release).
 
 ## Answers
 
@@ -188,6 +221,7 @@ value." RFC 9110 §9.1: "The method token is case-sensitive", so a proof for `ge
 | 400 `invalid_request` | two `Authorization` headers, a token in the query as well, or credentials that are not token68 | both challenges, both with the error |
 | 401 `invalid_token` | the token fails a check in step 2, is bound to nothing in production, or its binding does not hold | both challenges, the error in the scheme the client used |
 | 401 `invalid_dpop_proof` | the DPoP proof fails a check: `htm`, `htu`, `ath`, its signature, its age, or a replayed `jti` | the same |
+| 401 `use_dpop_nonce` | the DPoP proof carries no nonce, or one this server did not issue in the current minute or the one before | the error in the DPoP challenge; `DPoP-Nonce` carries the nonce to use |
 | 403 `insufficient_scope` | the token lacks the route's scope | the error and `scope="<the scope>"` in the scheme used |
 | 429 | a rate limit | none; `Retry-After` in whole seconds |
 | 503 | not configured, PingFederate's issuer, keys, introspection endpoint or Redis could not answer | none |
@@ -196,6 +230,40 @@ Every answer carries `Cache-Control: no-store` and no body. RFC 6750 §3: "If th
 include authentication credentials or does not contain an access token that enables access to the protected
 resource, the resource server MUST include the HTTP "WWW-Authenticate" response header field". A 503 is never a
 pass: nothing that could not answer lets a request through, and an outage is not counted as the caller's failure.
+
+## DPoP nonces
+
+From 0.7.0 ([F-0276](../findings.md#f-0276)) a DPoP proof to an operator API must carry a nonce this server issued,
+so a proof is good only within a window the server chose rather than one the client's clock chose. RFC 9449 §9:
+"Resource servers can also choose to provide a nonce value to be included in DPoP proofs sent to them. They provide
+the nonce using the DPoP-Nonce header in the same way that authorization servers do as described in Sections 8 and
+8.2. The error signaling is performed as described in Section 7.1. Resource servers use an HTTP 401 (Unauthorized)
+error code with an accompanying WWW-Authenticate: DPoP value and DPoP-Nonce value to accomplish this."
+
+- **The round trip.** A client's first request, with no nonce in its proof, is answered 401 with
+  `WWW-Authenticate: DPoP error="use_dpop_nonce"` and the nonce in `DPoP-Nonce`; it signs a new proof with that nonce
+  and sends the request again. That refusal is reached only with a valid token and an otherwise valid proof, so it is
+  not a failed authentication and never counts towards `OIDF_OPERATOR_AUTH_FAILURES_PER_MINUTE`. It is still an
+  `admin.request.refused` event, with the reason `use_dpop_nonce`.
+- **Moving on.** A nonce is current for a minute and accepted for one more. A request whose proof carries last
+  minute's nonce is let through, and the answer carries the current one in `DPoP-Nonce` with
+  `Cache-Control: no-store` - RFC 9449 §8.2: "A more efficient manner of supplying a new nonce value is also defined by
+  including a DPoP-Nonce HTTP header in the HTTP 200 (OK) response from the previous request." A client that keeps
+  using the nonce it was last given never sees a second `use_dpop_nonce` unless it is idle for more than a minute.
+- **Across nodes.** A nonce is an HMAC over the minute under a secret (rs-validation's `DpopNonces`; RFC 9449 §8:
+  "Nonce values MUST be unpredictable."). With Redis configured the secret is in Redis under `oidf:admin:dpop-nonce:secret`:
+  the first node to need it writes 32 random bytes there for a day, every node reads the same value on each DPoP
+  request, and a node that cannot read it answers 503 `nonce_unavailable`. When the key expires a new secret is
+  written, and each client gets one more `use_dpop_nonce`. Without Redis the secret is each JVM's own, so behind a
+  load balancer with no affinity a client can be handed a nonce one node issued and another refuses - one node only,
+  as for replay below.
+- **Turning it off.** `OIDF_OPERATOR_DPOP_NONCE=false` turns nonces off in development; production refuses it (the
+  operator API answers 503 with the reason, and the start-up audit names the setting). Bearer and certificate-bound
+  tokens carry no proof, so nonces do not apply to them.
+
+**Upgrading from 0.6.x.** An operator client that does not handle `use_dpop_nonce` - retry once with the nonce from
+`DPoP-Nonce` - fails every DPoP request after the upgrade. Update the client first, or in development set
+`OIDF_OPERATOR_DPOP_NONCE=false` until it is.
 
 ## Introspection and the binding
 
@@ -243,7 +311,7 @@ gives (plan item H-ATT-3, `platform.net.TrustedProxies`, from 0.6.0): the addres
 (`getRemoteAddr()`), or, when that is a proxy `OIDF_TRUSTED_PROXIES` lists, the right-most `X-Forwarded-For` (or
 RFC 7239 `Forwarded`) hop it does not list. With the list unset no forwarding header is believed, and behind a load
 balancer every caller shares the proxy's counter, so ten failures from anyone lock out everyone for the rest of the
-minute (F-0275): name your proxies in `OIDF_TRUSTED_PROXIES`
+minute ([F-0275](../findings.md#f-0275)): name your proxies in `OIDF_TRUSTED_PROXIES`
 ([trusted-proxies](../configuration/trusted-proxies.md)). The platform README's "net" section says how that sits
 with PingFederate's own incoming proxy settings.
 
@@ -251,7 +319,9 @@ with PingFederate's own incoming proxy settings.
 
 Every request let through and every one refused emits an event from the `operator` catalogue
 (`libs/platform-pf/src/main/resources/META-INF/oidf-events/operator.json`), which PingFederate's audit log records and
-`oidf_events_total` counts:
+`oidf_events_total` counts. One exception: a success on a scrape route (`metrics.read`, `OperatorRoute.scrape`) is
+emitted unaudited - counted and in `server.log` at its level, not in the audit log - so a Prometheus scraping every 15
+seconds does not bury it; a refused scrape is audited.
 
 - `admin.request.authorised`: `route`, `scope`, `actor`, `claimed_label`, `client_address`, `binding`.
 - `admin.request.refused`: the same but `binding`, with `status`, and the reason (`invalid_token`,
@@ -261,14 +331,11 @@ Every request let through and every one refused emits an event from the `operato
 `claimed_label` is classed `DIRECT_ID`, because a caller can put a person's name in it; `client_address` is
 `NETWORK`. PingFederate's audit log keeps the label as sent; server.log, usually shipped more widely, carries
 `sha256:` and twelve hex digits of it instead (platform-pf's `PfAuditSink.PROCESS_POLICY`, finding
-F-0165), so two lines with the same label still match. The federation events' `actor` -
+[F-0165](../findings.md#f-0165)), so two lines with the same label still match. The federation events' `actor` -
 on Trust Mark grants, hosted-entity changes, key revocations and the policy decision point's enrolment questions - is
 the token's subject, never the header.
 
 ## What it does not do yet
 
-- **DPoP nonces.** RFC 9449 §8 lets a resource server require a server-provided nonce; this authenticator does not,
-  so a proof is fresh by its `iat` (rs-validation's window: 300 s, with 60 s of skew) and its `jti`
-  (F-0276).
-- **Subordinate, SSF and metrics administration.** Their scopes are defined; no route uses them yet
+- **Subordinate and SSF administration.** Their scopes are defined; no route uses them yet
   ([the routes](#the-routes)).

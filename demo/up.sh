@@ -32,6 +32,9 @@
 #   PF_RIG_NAME     the container, image and compose project (default pf-agentic-identity, project
 #                   "conformance"). Another name runs a second rig beside the first - another checkout's -
 #                   instead of replacing it; give it its own PF_PORT_* and PF_AUTHOR_*_PORT too.
+#   PF_RIG_SLOT     0 to 44: take the slot's ports (layout.sh's pfai_slot_ports: 57100 + 20 x slot, offsets 0-4)
+#                   for PF_PORT_* and PF_AUTHOR_*_PORT, and name the rig pf-rig-s<slot> unless PF_RIG_NAME says
+#                   otherwise. A port set explicitly still wins. Unset keeps the ports above.
 #   PF_PROFILE      federation: PF is its own Trust Anchor (vars.federation.env), for the suite's
 #                   deployed-entity plan. federation-op: that, and PF joined to the suite's own federation
 #                   (vars.federation-op.env) with PAR optional and the suite's CA trusted, for the OP plan -
@@ -46,6 +49,14 @@ HERE="$(cd "$(dirname "$0")" && pwd)"; REPO="$(cd "$HERE/.." && pwd)"
 [[ -n "${PF_RELEASE:-}" || ! -f "$REPO/pom.xml" ]] || export PF_AGENTIC_IDENTITY_HOME="$REPO"
 # shellcheck source=layout.sh
 . "$HERE/layout.sh"
+if [[ -n "${PF_RIG_SLOT:-}" ]]; then
+  pfai_slot_ports "$PF_RIG_SLOT" || exit 1
+  export PF_RIG_NAME="${PF_RIG_NAME:-pf-rig-s$PF_RIG_SLOT}"
+  export PF_PORT_HTTPS="${PF_PORT_HTTPS:-$PFAI_PORT_RIG_HTTPS}" PF_PORT_HTTP="${PF_PORT_HTTP:-$PFAI_PORT_RIG_HTTP}"
+  export PF_PORT_ADMIN="${PF_PORT_ADMIN:-$PFAI_PORT_RIG_ADMIN}"
+  export PF_AUTHOR_ADMIN_PORT="${PF_AUTHOR_ADMIN_PORT:-$PFAI_PORT_RIG_AUTHOR_ADMIN}"
+  export PF_AUTHOR_RUNTIME_PORT="${PF_AUTHOR_RUNTIME_PORT:-$PFAI_PORT_RIG_AUTHOR_RUNTIME}"
+fi
 export PF_RIG_NAME="${PF_RIG_NAME:-pf-agentic-identity}"
 # The default rig keeps the project name docker compose always gave it (this directory's), so an existing
 # one is still this project's to stop; any other name is a project of its own.

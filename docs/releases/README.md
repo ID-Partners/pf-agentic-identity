@@ -18,6 +18,9 @@ into the page when the release is cut.
   [0.5.0-to-0.6.0.md](../operator/upgrading/0.5.0-to-0.6.0.md).
 - [0.6.1.md](0.6.1.md) - the repository split: releases published at ID-Partners/pf-agentic-identity from an
   allow-list, 0.3.0 to 0.6.0 mirrored there, and the image and the rig staged from a release; no module changed.
+- [0.7.0.md](0.7.0.md) - Phase 4: durable, clustered and rotatable - migrations by `oidf-db-migrate.jar`, a
+  cluster supported for what the suite verified, a leased SSF delivery engine, federation keys rotated without a
+  restart, metrics and licensed CI; with its upgrade guide, [0.6.x-to-0.7.0.md](../operator/upgrading/0.6.x-to-0.7.0.md).
 
 Each page is published at [ID-Partners/pf-agentic-identity](https://github.com/ID-Partners/pf-agentic-identity)
 at its release's tag: from 0.6.1 with the release, and 0.3.0 to 0.6.0 as they were mirrored there. The page at a

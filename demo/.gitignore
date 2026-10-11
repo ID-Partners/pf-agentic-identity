@@ -23,3 +23,7 @@ suite/*.json
 .rar-principal/
 terraform/.terraform/
 terraform/terraform.tfstate*
+.key-rotation/
+
+# The licensed conformance driver's plan output and PingFederate logs (tools/ci/licensed-conformance.sh).
+out/

@@ -193,7 +193,7 @@ than taken for the release. A release that is refused is not left there.
 adds the CIBA simulator, which a release carries as `demo-only-ciba-sim.jar` so that nothing globbing
 `pf.plugins.*` deploys it, under its own name, `pf.plugins.ciba-sim.jar` (plugins/ciba-sim).
 The production profile never stages it. The release name is a label, not a guard: PingFederate 13.1.3 loads the
-jar from `server/default/deploy` under either name (U-0460).
+jar from `server/default/deploy` under either name ([U-0460](../docs/findings.md#u-0460)).
 
 | Setting | Default | What it does |
 |---|---|---|
@@ -220,10 +220,12 @@ and push to main, and a release needs it green (`.github/required-checks.txt`). 
 - checks each image's OCI labels (this build's version and commit, an RFC 3339 build time), that it declares 9031
   and 9999 and nothing else, that its healthcheck is `pf-healthcheck.sh`, that it leaves the licence agreement at
   the base image's `NO` and the plain listener at `-1`, that PingFederate's `run.properties` template sets no
-  `oidf.*` property and its `log4j2.xml` names none of this repository's loggers, that there are no mock attesters
+  `oidf.*` property and its `log4j2.xml` names none of this repository's loggers, that the image's own `log4j2.xml`
+  differs from PingFederate's only in `server.log`'s pattern, which prints `%X{httprequestid}` (F-0395), that there are no mock attesters
   and no bash, and that platform-pf's manifest in the image carries the commit;
 - holds every file, link and directory under `/bin`, `/sbin`, `/lib`, `/usr`, `/etc` and `/var` to the base
-  image's, byte for byte, apart from `age`, `age-keygen` and age's licence (F-0220);
+  image's, byte for byte, apart from `age`, `age-keygen` and age's licence (F-0220), and PgJDBC's licences (F-0330),
+  and checks that PgJDBC is in `server/default/lib`;
 - builds the default target from a placeholder archive, and checks that it refuses a context with none;
 - writes a syft SBOM of each image (SPDX JSON, the `image-sbom` artefact) and scans it with grype, and scans the
   base image the same way (the reports are the `image-scan` artefact, the verdicts are in the job summary).
@@ -233,7 +235,7 @@ PingFederate's when the base image's scan has the same vulnerability in the same
 PingFederate's jars (which the assembled war carries too), its Java runtime, the tools Ping installs. Those are
 reported and never fail the build, because they are not ours to fix: a PingFederate version bump is what fixes
 them, and the job's summary lists them for the day the bump is chosen. Everything else is ours - the jars
-`stage-modules.sh` stages, anything the assembler adds to the war, the `age` binaries the Dockerfile installs -
+`stage-modules.sh` stages, anything the assembler adds to the war, the `age` binaries the Dockerfile builds -
 and a HIGH or CRITICAL finding there fails the job. A finding in one of our jars is ours even when
 PingFederate ships the same library at the same version with the same finding: the gate reads each profile's
 `modules/MANIFEST` (`--ours-manifest`) and a finding found inside a jar it names, loose in `server/default/deploy`
@@ -241,8 +243,8 @@ or inside the war, is ours, since a PingFederate bump would fix PingFederate's c
 
 A finding of ours that cannot be fixed yet is accepted in `.github/grype.yaml`, one entry per vulnerability,
 package and version, each with its reason; the summary lists every accepted finding and names an entry that no
-longer matches. On 2026-09-29 one thing is accepted: two advisories in the SSH code of the `golang.org/x/crypto`
-v0.55.0 that age 1.3.2's release binaries are built with (F-0285). Until 0.6.0 the Dockerfile's `apk add`
+longer matches. On 2026-10-11 one thing is accepted: two advisories in the SSH code of the `golang.org/x/crypto`
+v0.55.0 that age 1.3.2 is built with, as its go.sum pins it (F-0285). Until 0.6.0 the Dockerfile's `apk add`
 reinstalled every base package, because the base image has no apk database (F-0220), so a scan reported the base
 image's own Alpine packages - zlib's CVE-2026-85091 among them - as ours; it no longer runs apk, and those
 packages are PingFederate's again.
@@ -287,6 +289,12 @@ Verified 2026-09-28 on 13.1.3: it wrote the same `web.xml` as the shell script i
 both profiles, and the same war again from its own output; the production and conformance images built with it
 carry the same seven filters in the same order as before. The evidence, and why it is a jar rather than a
 source-launched file, are in its README.
+
+From 0.7.0 the war is reproducible from its stage (F-0450): every staged jar's entry carries one time,
+2000-01-01T00:00:00 - the poms' `project.build.outputTimestamp` - instead of the jar's file time, so copying a stage again, or assembling in another time zone, gives the same bytes.
+On 2026-10-08 two production stagings four seconds apart assembled against 13.1.3's stock war gave one sha256,
+`8ed83174...`. The reference stacks ([reference/](../demo/reference/README.md)) build target `capability` with the
+production profile from a stage of their own, so they never overwrite the rig's `modules/`.
 
 ## The MANIFEST guard
 
@@ -349,6 +357,10 @@ Count the digest lines instead: `grep -cE '^[0-9a-f]{64}  ' MANIFEST`.
 3. Chooses the archive: `PF_ARCHIVE_FILE` if set, else `data.zip.age` in the drop-in directory, else
    `data.zip` there. Encrypted and plain are told apart by content, not by name: an age file starts with
    `age-encryption.org/v1`, or with `-----BEGIN AGE ENCRYPTED FILE-----` when it was made with `age -a`.
+   An archive, or a `PF_ARCHIVE_AGE_KEY_FILE`, that exists but PingFederate's uid cannot read is refused as
+   that, with the uid and the file's mode and owner. Until 0.7.0 an unreadable archive failed the content test
+   and was reported as plaintext: C-7's first run on a Linux runner (2026-10-08) bind-mounted a host file that
+   was `0600` to uid 1000 into a container running as 9031, which Docker Desktop's file sharing had hidden.
 4. If `PF_ARCHIVE_SHA256` is set, checks the archive against it - before it is decrypted or imported.
 5. Decrypts an encrypted archive with the identity from `PF_ARCHIVE_AGE_KEY_FILE`, or, only when that is
    unset, from `PF_ARCHIVE_AGE_KEY`. The inline identity reaches `age` on a pipe, never a temporary file
@@ -365,8 +377,8 @@ Count the digest lines instead: `grep -cE '^[0-9a-f]{64}  ' MANIFEST`.
 
 | Variable | Default | What it does | When it's wrong |
 |---|---|---|---|
-| `PF_ARCHIVE_FILE` | `data.zip.age`, else `data.zip`, in the drop-in directory | The archive to boot from - a mounted secret, usually. It wins over an archive baked into the image, which is left where it is | Not a file: `FATAL: PF_ARCHIVE_FILE=... is not a file`, no boot |
-| `PF_ARCHIVE_AGE_KEY_FILE` | unset | Path to the age identity, as a mounted secret file. **Preferred**: it is never in the container's metadata. Read at every start, restarts included, so keep it mounted | Set but missing: `FATAL: ... does not exist` - no fall-through to the inline key. Wrong identity: `FATAL: could not decrypt the config archive`, and no plaintext is left behind |
+| `PF_ARCHIVE_FILE` | `data.zip.age`, else `data.zip`, in the drop-in directory | The archive to boot from - a mounted secret, usually. It wins over an archive baked into the image, which is left where it is | Not a file: `FATAL: PF_ARCHIVE_FILE=... is not a file`, no boot. There but unreadable to the container's uid (a bind-mounted host file keeps the host's owner and mode on Linux): `FATAL: the config archive ... exists but cannot be read by uid 9031 (gid 0): it is -rw------- owner 1000:1001`. Ciphertext may be `0644`; or hand the uid its own copy |
+| `PF_ARCHIVE_AGE_KEY_FILE` | unset | Path to the age identity, as a mounted secret file. **Preferred**: it is never in the container's metadata. Read at every start, restarts included, so keep it mounted | Set but missing: `FATAL: ... does not exist` - no fall-through to the inline key. There but unreadable to the container's uid: `FATAL: PF_ARCHIVE_AGE_KEY_FILE=... exists but cannot be read by uid ...`, with its mode and owner - hand the uid a `0400` copy (the reference stacks do it on a tmpfs) rather than widen the host file. Wrong identity: `FATAL: could not decrypt the config archive`, and no plaintext is left behind |
 | `PF_ARCHIVE_AGE_KEY` | unset | The identity itself, read only when `_FILE` is unset. Gone from the process environment before PingFederate starts, but still in `docker inspect` - the reason to prefer the file | Wrong: as above. Neither set for an encrypted archive: `FATAL: ... neither PF_ARCHIVE_AGE_KEY_FILE nor PF_ARCHIVE_AGE_KEY is set` |
 | `PF_ARCHIVE_SHA256` | unset (no check) | The archive's SHA-256 in hex, any case, of the file as shipped - the ciphertext for an encrypted archive | Mismatch: `FATAL: ... does not match PF_ARCHIVE_SHA256`, before anything is decrypted. Not 64 hex digits: `FATAL: PF_ARCHIVE_SHA256 is not a hex SHA-256` |
 | `PING_IDENTITY_ACCEPT_EULA` | the base image's `NO` | `YES` or `Y`, in any case, accepts Ping Identity's licence agreement. Until 0.6.0 the image set `YES` for everyone who ran it | Anything else: `FATAL: PING_IDENTITY_ACCEPT_EULA is '...': set PING_IDENTITY_ACCEPT_EULA=YES at run time`, before anything else |
@@ -496,7 +508,7 @@ R-I3); each is yours to set at run time, and the rig in `conformance/` sets the 
 |---|---|---|---|
 | Ping Identity's licence agreement | `ENV PING_IDENTITY_ACCEPT_EULA=YES` | the base image's `NO`; the entrypoint stops the boot until you accept it | `PING_IDENTITY_ACCEPT_EULA=YES` |
 | PingFederate's plain HTTP listener | on, port 9080, in every image | off (`PF_RUN_PF_HTTP_PORT=-1`), and refused in production | `PF_RUN_PF_HTTP_PORT=9080` with `OIDF_DEPLOYMENT_PROFILE=development`. PingFederate's own template warns that turning it on "is not recommended" and needs the secure session cookie off in `session-cookie-config.xml`; in production, terminate TLS in front of 9031 instead |
-| This repository's loggers | `DEBUG` for `com.pingidentity.ps.oidf`, written into `log4j2.xml` | PingFederate's `log4j2.xml` as shipped: they inherit its root, `INFO` | a `log4j2.xml` of your own, in a server profile or a mount |
+| This repository's loggers | `DEBUG` for `com.pingidentity.ps.oidf`, written into `log4j2.xml` | PingFederate's `log4j2.xml` as shipped: they inherit its root, `INFO`. From 0.7.0 that file is the one control - no level is set in code - and every line ends with `ctx[tid=.. rid=.. traceparent=..]` ([docs/operator/logging.md](../docs/operator/logging.md)) | a `log4j2.xml` of your own, in a server profile or a mount, by logger name: `com.pingidentity.ps.oidf`, `com.pingidentity.ps.oidf.<family>.event.<category>`, `au.com.idpartners.gm` |
 | `ForceUnsupportedImport` | `true` in `overlay/` | `false`, PingFederate's default | see [The drop-in deployer's settings](#the-drop-in-deployers-settings) |
 | Required attestation claims | `oidf.attestation.required.claims=workload` in `run.properties` | none, the code's default | `OIDF_ATTESTATION_REQUIRED_CLAIMS=workload` (or the system property) |
 | Mock attesters | `oidf-mock-attesters.json` copied from the build context when present, and `oidf.mock.attesters` pointed at it | not read from the context and not set | development only: mount the file and set the system property `oidf.mock.attesters` to its path yourself, through `JAVA_OPTS` or a server profile's `run.properties`. The settings catalogue classes it forbidden in production |
@@ -510,11 +522,42 @@ The labels, the ports and the healthcheck are the image's own, and describe it r
 - `HEALTHCHECK`, below.
 
 The base image has no apk database (`/lib/apk/db` holds no installed file), so an `apk add` there reinstalls the
-whole of its Alpine userland at the day's versions (F-0220). age now comes from its own GitHub release, 1.3.2,
-checked against a sha256 the Dockerfile records for each architecture before it is unpacked, and bash is gone from
+whole of its Alpine userland at the day's versions (F-0220). age is built from its 1.3.2 module source in the
+`age-build` stage, with a Go toolchain pinned by digest (`golang:1.27.2-alpine3.24`), and `go install` checks the
+module and every dependency against the Go checksum database; the image gets the two binaries and age's licence
+and no Go. Until 0.7.0 it was age's own release binary, built with go1.27.0, whose standard library failed the
+image scan (F-0708). So a build of the image fetches the golang image from Docker Hub and age's source from
+`proxy.golang.org`, checked against `sum.golang.org`, where it used to fetch age from GitHub. bash is gone from
 the image: `pf-entrypoint.sh` and `pf-healthcheck.sh` are `sh` scripts, and bash is installed only in the
 `builder` stage, for the war assembler's wrapper. Build's image job holds the image's system files to the base
-image's apart from age.
+image's apart from age and PgJDBC's licences.
+
+### PostgreSQL's JDBC driver
+
+From 0.7.0 the image carries PgJDBC, PostgreSQL's JDBC driver ([F-0330](../docs/findings.md#f-0330)). The stock
+image has none: on 2026-10-06 the pinned digest had `h2.jar`, `hsqldb.jar` and `spring-jdbc.jar` in
+`server/default/lib` and no jar anywhere holding `org/postgresql/Driver.class`. Every store here is PostgreSQL
+([docs/operator/database.md](../docs/operator/database.md)), and both ways to reach it need the driver:
+
+- a PingFederate JDBC data store on PostgreSQL (`OIDF_SSF_DATA_STORE_ID`, `OIDF_AUTHORITY_DATA_STORE_ID`, the instance
+  registry's data store), whose pool PingFederate builds with the driver class the data store names;
+- a direct URL in development (`OIDF_SSF_JDBC_URL`, `OIDF_AUTHORITY_JDBC_URL`, the instance registry's "JDBC URL"),
+  which platform's `DataSources` opens with `Class.forName("org.postgresql.Driver")`.
+
+The Dockerfile's `pgjdbc` stage downloads `postgresql-<version>.jar` from Maven Central and checks it against the
+sha256 it records (taken on 2026-10-06 and cross-checked with Central's own `.sha1`) before anything reads it. The
+jar goes to `/opt/in/instance/server/default/lib/`, which the base image's bootstrap copies to
+`/opt/out/instance/server/default/lib/` at every start, as it does `deploy/`: there PingFederate's engine and the
+webapp both see it. It is never in `modules/`, which goes into `pf-runtime.war`. The version is the one the
+reactor's tests run on, `bom/pom.xml`'s `version.postgresql` (42.7.13); `tools/pf-version-check.py` fails when the
+Dockerfile's `PGJDBC_VERSION` is another, so a Dependabot bump of the BOM fails the build until the Dockerfile's
+version and its sum move with it. The licence is BSD-2-Clause, and so are the four OnGres libraries the jar bundles
+(SCRAM and SASLprep): the image carries the jar's `LICENSE` and its `licenses/` folder at
+`/usr/local/share/licenses/pgjdbc/`, and the `org.opencontainers.image.licenses` label names BSD-2-Clause.
+
+To use a different driver build, put your own jar in `server/default/lib` through a server profile; two copies of
+`org.postgresql.Driver` on the same classpath are a classloading accident waiting to happen, so remove this one
+(`postgresql-42.7.13.jar`) when you do.
 
 ### The drop-in deployer's settings
 

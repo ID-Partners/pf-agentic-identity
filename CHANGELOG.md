@@ -8,9 +8,524 @@ it sits under `Unreleased` with the version the poms declare (a `-SNAPSHOT`); th
 it the heading `[<version>] - <date>`, the date the tag is cut, and leaves an empty `Unreleased` for the next
 `-SNAPSHOT`.
 
-## [Unreleased] - 0.7.0-SNAPSHOT
+## [Unreleased] - 0.8.0-SNAPSHOT
 
-Phase 4 of the production programme, durable and clustered: the SSF delivery engine, migrations run by db-migrate, the cluster topology with Redis and leases, federation signing-key rollover and subordinate key pinning, metrics and logging, the reference stacks and the cluster verification suite. Release notes arrive as fragments under docs/releases/unreleased and are folded in at release.
+## [0.7.0] - 2026-10-11
+
+Phase 4 of the production programme, durable, clustered and rotatable: a console and engines with JDBC client storage,
+`jdbc` leases and SSF on the `tables` dialect, verified by a cluster suite for PingFederate's clients and tokens, the
+leases and SSF's transmitter (federation, attestation, automatic registration and the SSF receiver are not verified on
+a cluster: F-0601); migrations run by `oidf-db-migrate.jar`, a new release asset, with a start-up check per store; the
+SSF delivery engine, leased, pooled, held and fanned out through an outbox, with a shared receiver inbox; federation
+signing keys rotated without a restart and subordinate keys pinned; a Prometheus endpoint, one logger and correlation
+ids; SpotBugs in every build; and boot-smoke, conformance and the cluster suite as licensed jobs a release needs
+green. Notes, and the upgrade guide they link: [docs/releases/0.7.0.md](docs/releases/0.7.0.md).
+
+- `tools/db-migrate/pom.xml`: the jar plugin rewrites `oidf-db-migrate.jar` every build (`forceCreation`), as every
+  other shaded module's already did, so the release's rebuild makes the bytes its verify build made; the dry run had
+  stopped at the byte comparison on it (F-0606).
+- The image's `age` and `age-keygen` are age 1.3.2 built from its module source with Go 1.27.2 (the
+  `golang:1.27.2-alpine3.24` image, pinned by digest), in the Dockerfile's new `age-build` stage, instead of age's
+  own release binaries, which are built with go1.27.0 and failed the image scan with two critical and eight high
+  standard-library advisories (F-0708). `go install` checks the module and its dependencies against the Go checksum
+  database; the image carries the two binaries and age's licence and no Go.
+- `tools/pf-version-check.py` accepts one image FROM besides the pinned PingFederate one: the golang toolchain the
+  age build uses, which must be pinned by digest. Dependabot's docker entry bumps it with the PingFederate image.
+
+- `Budget.take()` (libs/platform) takes a request with one atomic update instead of a compare-and-set loop. Behaviour
+  is unchanged; the 100% coverage gate no longer needs two threads to collide to reach the retry branch, so the
+  java job stops failing at random on it (F-0436).
+
+- `services/cluster-suite` and `reference/cluster/suite.sh`: the cluster verification suite (C-7) on the reference
+  cluster - topology, the client storage windows, lease failover, SSF push across two engines with one killed, Redis,
+  PostgreSQL, engine and console faults under load, and a rolling replacement of every node - writing `results.json`
+  and keeping every log.
+- `licensed.yml`'s `cluster` job: the suite weekly (Wednesdays 07:13 UTC) and by hand, on the self-hosted runner's
+  licence file; a release needs it green on the tagged commit beside boot-smoke and conformance.
+- A cluster of a console and engines with JDBC client storage, the `jdbc` lease backend, one Redis and SSF on the
+  `tables` dialect is supported from 0.7.0 for PingFederate's clients and tokens, the leases and SSF's transmitter;
+  federation, client attestation, automatic registration, the SSF receiver, hosting, the operator APIs and FAPI are
+  not verified on a cluster (F-0601, U-0601); `docs/operator/deployment-limits.md` says what else is not (F-0007).
+- The SSF store's start-up line says "cluster-safe" only when its push stream leases are shared (F-0125).
+- reference/cluster: HAProxy follows the engines by name through Docker's DNS, so a replaced engine comes back into
+  rotation (F-0603), and `up.sh` restarts each engine once after its first replication so it trusts the stack's CA
+  (F-0585).
+- The image's entrypoint refuses an archive (or a `PF_ARCHIVE_AGE_KEY_FILE`) that exists but its uid cannot read, and
+  says so with the uid and the file's mode and owner; it used to call an unreadable archive plaintext. The reference
+  stacks run on Linux hosts as well as Docker Desktop: `data.zip.age` is `0644` ciphertext, and every secret reaches a
+  non-root container as its own `0400` copy (reference/README.md, "File ownership on Linux").
+
+- `.github/workflows/licensed.yml` replaces `conformance-federation.yml`. **boot-smoke**, nightly: the image built from
+  the commit and booted under a licence, live, ready, discovery and a token from PingFederate's own token endpoint,
+  then `conformance/fail-soft-matrix.sh`'s negative boots. **conformance**, weekly: FAPI 2.0, FAPI-CIBA, SSF, SSF CAEP
+  Interop and both OpenID Federation plans, one at a time, each against `conformance/expected/<entry>.json` with
+  `--strict-expectations`. Both by hand too (`gh workflow run licensed.yml -f suites=all`).
+- The jobs run only on the self-hosted runner (`[self-hosted, pfai-linux]`) and read the Ping DevOps credentials from
+  `~/.pingidentity/config` of its `runner` user; there is no repository secret, environment or variable for the licence.
+  Without the file every licensed job is skipped with a notice. What a job prints or keeps is scrubbed of the user
+  and key first (`tools/ci/licensed-scrub.py`).
+- Release refuses a tag unless `boot-smoke` and a `conformance (<entry>)` for every expectations file are green on its
+  commit (step "a green licensed run on this commit"); a dry run warns and carries on.
+- `fail-soft-matrix.sh` gains two production-profile boots, from an age-encrypted copy of the rig's archive: a store in
+  memory without the `in-memory-state` risk (`ATTESTATION_ISSUER` refused), and a `CLUSTERED_ENGINE` node on
+  PingFederate's XML client storage (`FEDERATION` refused). Each checks the `platform.profile.refused` event, the
+  component's 503, ready 503, live 200 and PingFederate's own token endpoint.
+- `tools/ci/licensed-conformance.sh <entry>` runs one plan the way CI does on any machine with Docker and a licence:
+  the suite joins the rig's network and answers to `host.docker.internal`, so the OP plan runs on Linux too.
+
+- Every statement the federation, agent, instance-registry and SSF stores make carries a query timeout from a
+  deadline (10 seconds per operation), multi-statement changes run in one transaction, and reads are retried on a
+  lost connection, a serialisation failure or a deadlock (DB-5).
+- One place makes a store's DataSource (`platform.jdbc.DataSources`, with `PfDataStores` for PingFederate data
+  stores); the copies in pf-integration and the SSF servlets are gone. A direct JDBC URL is refused in code under
+  the production profile, as its catalogue already classed it.
+- rar-model reads and writes JSON with platform's `Json`; its own copy is deleted (F-0130). Fingerprints are unchanged.
+- New operator page, [docs/operator/database.md](docs/operator/database.md): PgJDBC timeouts, `sslmode=verify-full`
+  and a role-level `statement_timeout`.
+
+- Leases (plan item C-4): `OIDF_LEASE_BACKEND` chooses `local` (the default), `jdbc` (table `oidf_lease`, migration
+  V10, on PostgreSQL's clock) or `redis`; each lease carries a fencing token that rises whenever a new holder takes it.
+  `ManagedExecutors.leaderEvery` runs a job on the node that holds its lease.
+- The registration expiry sweeper and the SSF poll receiver run on `leaderEvery`, so with a `jdbc` lease a clustered
+  production node serves AUTO_REGISTRATION and SSF_RECEIVER. S10A's leased push delivery lets a clustered node serve SSF on the
+  `tables` dialect (F-0516). A clustered production node takes `redis` leases only with the new `redis-lease` risk (F-0515).
+- A Redis URL's userinfo is decoded once (F-0180); a Redis write that outlives its command's deadline is ended
+  (F-0181); a hand-set executor claim no longer stops a job (F-0196); each federation service warms its own
+  subordinate cache (F-0202); CI fails when platform's live Redis or lease suites skip (F-0182).
+
+- New release asset `oidf-db-migrate.jar` (`tools/db-migrate`): applies every module's versioned migrations, by
+  family, with a history in `oidf_schema_history`, one transaction per script and a PostgreSQL advisory lock so two
+  runners never interleave. Commands `info`, `validate` (exit 1 on checksum drift, gaps or unknown versions),
+  `migrate [--family F] [--target V]`, `adopt --family F --baseline V` (records a database built by hand or by
+  0.3.0-0.6.x only if its tables, columns, constraints and indexes match exactly) and `grants --runtime-role R
+  [--apply]` (the runtime role's row privileges, no DDL). It refuses a JDBC URL without TLS unless
+  `--allow-plaintext`, takes the password only from a file, and prints no secret. Our own runner, not Flyway
+  ([docs/operator/database-migrations.md](docs/operator/database-migrations.md)).
+- The SSF tables store's schema is the `ssf` migration family: V300 (the four tables), V301 (`owner_client_id` and the
+  three SSF 1.0 stream members) and V302 (`push_auth_header` becomes `TEXT`). `JdbcSsfStore` runs no DDL and
+  PingFederate no longer creates or alters the SSF tables at start-up, so two nodes no longer race an
+  `ALTER TABLE` (F-0018, advanced).
+- Stream management refuses a push `authorization_header` over 8192 characters with a 400; any accepted header fits
+  sealed at rest (F-0404).
+- The BOM no longer manages H2 (F-0255).
+
+- New endpoint `/agentic-identity/metrics` (plan item O-5): every metric this repository counts on the node, in the
+  Prometheus text format (`text/plain; version=0.0.4`), for an operator token with `oidf.metrics.read` (route
+  `metrics.read`). `GET` and `HEAD`; `Cache-Control: no-store`. Served by `pf-runtime.war` on the runtime port and by
+  `gm-api.war` on its own. New operator page: [docs/operator/metrics.md](docs/operator/metrics.md).
+- A successful scrape emits `admin.request.authorised` but is not written to PingFederate's audit log; a refused one
+  is, as on every operator route.
+- Every series carries a `copy` label - `webapp`, `engine`, `rar`, `cibasim` or `other` - naming the loaded copy of
+  the code that counted it. The engine's copy, where the OGNL criteria and token mappings decide, and the RAR plugin's
+  are rendered beside the webapp's (F-0170): each hands its metrics to the webapp on the request, in JDK types only.
+  A metric label may no longer be named `copy`.
+- New families: the SSF backlog by stage (`oidf_ssf_backlog_sets`, `oidf_ssf_backlog_oldest_seconds`, sampled every
+  `OIDF_METRICS_SAMPLE_SECONDS`, new, default 15, in the [metrics](docs/configuration/metrics.md) catalogue) and
+  `oidf_ssf_sets_dropped_total`; lease calls and fencing refusals; the federation signing keys by state and their ages;
+  Redis commands, permit waits and failovers; JDBC connections, statements, transactions and retries. The backlog's
+  `outbox` stage counts the emission outbox (S10d); S10c's `oidf_ssf_stream_paused_total{cause}` and
+  `oidf_ssf_queue_trimmed_total` and S10d's `oidf_ssf_outbox_appended_total` and `oidf_ssf_outbox_fanned_out_total{outcome}`
+  are catalogued. Every family is catalogued under `"metrics"` in its module's event catalogue.
+- New setting `OIDF_METRICS_CLIENT_IDS` (U-0566): the PingFederate clients whose access tokens bound to nothing may
+  scrape `/agentic-identity/metrics` in production, with `oidf.metrics.read`. It is the one production exception to
+  the operator APIs' sender-constraint, and only on this route: every other route, and this one for any other client,
+  still refuses an unbound token. Each such scrape counts in `oidf_operator_unbound_scrapes_total`. Unset, nothing
+  changes. rs-validation's `DelegatedTokenValidator.Builder` gains `allowUnboundWhen(Predicate)` for it.
+
+- Every line the shipped code writes goes through libs/platform's `PlatformLog` (plan item O-6): the RAR plugin and
+  gm-api leave `java.util.logging`, whose lines reached `server.log` as `ERROR [SystemErr]` whatever their level
+  (F-0075, F-0520), and 93 classes leave commons-logging. `tools/log-scan.py` refuses any other logger in shipped code
+  in CI.
+- Every line ends with `ctx[tid=.. rid=.. traceparent=..]`: PingFederate's tracking id and request id and a W3C
+  `traceparent`, the ones the thread has. `OIDF_LOG_CORRELATION=off` (new, in the
+  [platform-log](docs/configuration/platform-log.md) catalogue) turns it off for a `log4j2.xml` that prints
+  `%X{httprequestid}` and `%X{traceparent}` itself.
+- A new filter, `OidfCorrelation` (`CorrelationFilter`), first of this repository's in `pf-runtime.war` at `/*` and
+  added by the lifecycle listener in `oidf.war` and `gm-api.war`, puts the request's `traceparent` on the thread - the
+  one it sent if valid, else a new one - and every outbound call sends a child of it. Background jobs, start-up and
+  shutdown run under ids of their own (`oidf-<job>-<8 hex>`). PingFederate's audit lines written through the SDK keep
+  `traceparent`.
+- A refusal's reference is PingFederate's own id: the tracking id where the thread has one, else the request id
+  (the caller's own correlation header's value when PingFederate's `requestHeaderForCorrelationId` names one), else
+  `oidf-<16 hex>`; it was `oidf-<8 hex>` at our filters (F-0395). The image's `server.log` pattern now prints
+  `%X{httprequestid}` after `%X{trackingid}` (`%d %X{trackingid} %X{httprequestid} %-5p [%c] %m%n`; PingFederate's
+  stock pattern printed the tracking id only), so the reference finds PingFederate's own lines for the request as well
+  as this repository's `ctx[rid=..]` lines. The attestation issuer's `X-Correlation-Id` is the same
+  reference, no longer a random UUID.
+- The lifecycle listener's shutdown lines reach `server.log` at a JVM stop (F-0210): one before the closes and one
+  after, naming any still running when the budget ran out.
+- The RAR plugin's per-request `RAR governance:` line, and gm-api's `query`, `evaluate`, `MCP evaluate` and
+  `MCP search` lines, are `DEBUG`.
+- New operator page: [docs/operator/logging.md](docs/operator/logging.md).
+
+- `reference/single` and `reference/cluster`: docker compose stacks that run PingFederate with the modules on the
+  production profile - one node on PostgreSQL 17 over TLS; or a console and two engines behind HAProxy with Redis
+  (ACL), OpenBao and an agent per node, profiles `spire` and `mdm` - with the roles, migrations and client storage
+  as jobs before PingFederate starts, an age-encrypted archive from `reference/terraform`, and smoke checks (C-6).
+- Slot ports: `REF_SLOT` and the rig's `PF_RIG_SLOT` give each stack or rig twenty ports from 57100 + 20 x slot.
+- The rig serves its own runtime certificate, from its own CA, naming `localhost`, `host.docker.internal`, the rig and
+  the issuer's host, and PingFederate trusts that CA (F-0362).
+- The war assembler stamps every staged jar with one entry time, so one stage assembles one war (F-0450).
+- Build's new `reference-data-tier` job checks the cluster's data tier on every pull request, and the lint job parses
+  every reference compose file.
+
+- SSF push delivery takes one stream at a time by lease (plan item S10a): each push stream has a row in
+  `ssf_stream_lease` (SSF migration V303), claimed with `FOR UPDATE SKIP LOCKED` and a fencing epoch, renewed while the
+  node delivers, and every ack, failed attempt and dead-letter pause fenced on it. Each stream has one deliverer across
+  nodes, the least recently served stream goes next, and a POST ends before its lease could. New setting
+  `OIDF_SSF_STREAM_LEASE_SECONDS` (30, 15-300); new event `ssf.push.stream_lease_lost`; new metrics
+  `oidf_ssf_stream_lease_claimed_total` and `oidf_ssf_stream_lease_lost_total`.
+- A clustered production node serves SSF on the `tables` dialect (F-0516) and refuses it on `ldm`, whose leases are in
+  each node's memory.
+- SETs go in the order they were queued on the `tables` and in-memory stores (`ssf_pending_sets.seq`, V304; F-0095).
+- The stream cap per receiver and the verification interval hold across nodes: the cap is counted and the stream
+  inserted in one transaction (F-0386), and the `tables` store keeps a stream's last verification in
+  `ssf_streams.last_verification_at` (V305; F-0385).
+
+- SSF push delivery runs on a pool (plan item S10b): each node's dispatcher claims as many push streams as it has free
+  workers (`OIDF_SSF_PUSH_WORKERS`, 4, 1-32), and each worker posts a batch of one stream's SETs in queue order
+  (`OIDF_SSF_PUSH_BATCH_SIZE`, 50, 1-50) before handing the stream back behind the streams served less recently.
+- Each receiver answer is classified as RFC 8935 reads it: 202 delivered; 200 and 204 delivered with the event
+  `ssf.push.delivered_nonstandard`; a 400 with `err` exactly `invalid_request` moves that SET to the new dead-SET
+  record and the batch goes on; `invalid_issuer`, `invalid_audience`, 404 and 410 pause the stream with the reason;
+  anything else, a 400 with another or no `err` included, is retried.
+- A refused endpoint pauses the stream instead of dropping each SET; a host that does not resolve is retried (F-0405).
+- Retries back off with full jitter between `OIDF_SSF_PUSH_RETRY_BACKOFF_SECONDS` (now 1-60) and the new
+  `OIDF_SSF_PUSH_RETRY_BACKOFF_MAX_SECONDS` (900, 60-3600), raised by a receiver's `Retry-After` (seconds or an
+  HTTP-date), clamped to the maximum with the event `ssf.push.retry_after_clamped`.
+- SETs a receiver refused for good - a push `invalid_request`, a poll `setErrs` entry - are kept in `ssf_dead_sets`
+  (SSF migration V306) for `OIDF_SSF_DEAD_SET_RETENTION_SECONDS` (604800, 3600-7776000), at most 10,000 per stream,
+  instead of being deleted (F-0361); events `ssf.push.set_dead` and `ssf.poll.set_dead`; metrics
+  `oidf_ssf_push_attempts_total{outcome}` and `oidf_ssf_dead_sets_total{source}`.
+- A poll answer stops short of 4 MiB, and the receiver halves `maxEvents` after an answer over its cap and doubles it
+  back after three clean polls (event `ssf.receiver.poll_shrunk`); `OIDF_SSF_POLL_MAX_EVENTS` is bounded 0-1000
+  (F-0406).
+- The SSF receiver sends its bearer only to the configuration URL's origin and those in the new
+  `OIDF_SSF_RECEIVER_TRANSMITTER_ORIGINS` (F-0407).
+
+- A paused SSF stream now hears and holds the events raised for it, and sends them in order when it is enabled
+  again; a disabled stream holds nothing, and disabling one deletes its queue (SSF 1.0 §8.1.2.1, plan item S10c,
+  F-0017). Each queue is bounded by the new `OIDF_SSF_STREAM_QUEUE_MAX` (10,000), oldest first, with a WARN and an
+  `ssf.stream.queue_trimmed` event per stream.
+- A status change the receiver did not ask for - the push engine's, the inactivity sweep's or an operator's - queues
+  a stream-updated SET (SSF 1.0 §8.1.5, `sub_id` the stream) at the head of the stream's queue. A stream that is not
+  enabled is sent its stream-updated SETs and nothing held behind them.
+- A push stream is paused once its pushes have failed for the new `OIDF_SSF_PUSH_PAUSE_AFTER_SECONDS` (24 h) without a
+  delivery, not after five failures of one SET. `OIDF_SSF_PUSH_RETRY_MAX_ATTEMPTS` is removed.
+- `inactivity_timeout` is enforced (F-0389): the receiver's management calls and polls restart it, and the leader job
+  `ssf-stream-sweeper` pauses an enabled stream whose receiver has been idle for longer.
+- Every write of a stream compares and sets its row version (SSF migration V308): a PATCH, PUT or status change that
+  meets another write re-reads the stream and applies itself again, and after three conflicts answers 503 with
+  `Retry-After: 1`.
+- New operator API `/ssf/admin/streams/*` on the operator scope `ssf.admin`: `GET {id}`, `POST {id}:pause`,
+  `POST {id}:resume` and `POST {id}/sets:retry-dead`. A stream an operator paused keeps its status until an operator
+  resumes it: every status change its receiver asks for is a 403.
+- New events `ssf.stream.status_changed`, `ssf.stream.queue_trimmed` and `ssf.stream.update_conflict`; new counters
+  `oidf_ssf_stream_paused_total{cause}` and `oidf_ssf_queue_trimmed_total`.
+
+- An SSF event is one row of an emission outbox, and a fan-out worker on any node mints and queues its SETs, one per
+  subscribed stream, in that row's own transaction (plan item S10d, F-0017). On the `tables` store the outbox is
+  `ssf_emission_outbox` (SSF migration V309), shared by every node; a crash part way rolls back and the row is fanned
+  out again, and a second fan-out of a row to a stream queues nothing. One subject's events go out in the order they
+  were written, on every node.
+- The audit source, the logout filter and the hooks (`SsfEventBridge`) only queue the event in a bounded hand-off in
+  memory: no store, signing or Kafka on PingFederate's thread. An `ssf-outbox-writer` thread writes the hand-off to the
+  outbox and keeps what a store that is down refuses, so a store blip no longer drops events.
+- `POST /ssf/events:emit` and SCIM still fan out before they answer, so their answers and SCIM's
+  account-disabled-before-removal order are unchanged.
+- A logout hint's replay key is kept in `ssf_logout_replay` on the `tables` store: a hint replayed to another node
+  raises nothing there (F-0402).
+- The Kafka producer is closed when the webapp shuts down, after the workers that publish to it (F-0201).
+- New settings `OIDF_SSF_OUTBOX_WORKERS`, `OIDF_SSF_OUTBOX_MAX_ATTEMPTS` and `OIDF_SSF_EMISSION_QUEUE_CAPACITY`; new
+  counters `oidf_ssf_outbox_appended_total` and `oidf_ssf_outbox_fanned_out_total{outcome}`; new event
+  `ssf.outbox.write_failed`; new `ssf.set.dropped` reasons `queue_full`, `fanout_failed` and `expired`.
+
+- The SSF receiver admits each inbound SET to an inbox keyed by its issuer and `jti` before it answers: a pushed SET
+  is answered with an empty 202 only once it is stored, and with 503 and `Retry-After` when it cannot be (plan item
+  S10e, F-0043). On the `tables` store the inbox is `ssf_receiver_inbox` (SSF migration V307), shared by every node.
+- The receiver's handlers run from the inbox on every node's `ssf-receiver-actions` worker: a failure is tried again
+  after 5 s, doubling to 300 s, a handler that succeeded never runs again for that SET, and after
+  `OIDF_SSF_RECEIVER_ACTION_ATTEMPTS` (10) failures the SET is dead (`ssf.receiver.action_dead`,
+  `oidf_ssf_receiver_action_dead_total`). The grant and instance-registry handlers now throw a failure instead of
+  logging it.
+- The poll receiver acknowledges from the inbox: whichever node holds the poll lease sends what any node admitted and
+  has not acknowledged, so an acknowledgement is no longer lost with its node.
+- New settings `OIDF_SSF_RECEIVER_ACTION_ATTEMPTS` and `OIDF_SSF_RECEIVER_INBOX_RETENTION_SECONDS`; new gauges
+  `oidf_ssf_receiver_inbox_pending` and `oidf_ssf_receiver_inbox_oldest_pending_seconds`; new events
+  `ssf.receiver.action_retry` and `ssf.receiver.action_dead`.
+
+- Every federation signer reads PingFederate's current signing key through one shared `FederationKeys`: the Entity
+  Configuration and the other federation endpoints, the explicit registration response, the self-anchor's own keys
+  and the SSF transmitter's SETs. A key PingFederate rotates signs within `OIDF_FEDERATION_KEY_REFRESH_SECONDS`
+  (new, default 30, 0 to 300) without a restart; until 0.7.0 the federation servlet read the key once, at start-up,
+  and the SET minter on its first SET (F-0011, part).
+- A signer holds one immutable key snapshot, so a JWS header's `kid` always names the key that signed it
+  (OpenID Federation 1.0 §3).
+- `OIDF_FEDERATION_SIGNING_ALG` and `OIDF_SSF_SIGNING_ALGORITHM` take `ES256` (PingFederate's P-256 key) and `ES384`
+  (its P-384 key) beside `RS256` and `PS256`.
+- The explicit registration response is signed with `OIDF_FEDERATION_SIGNING_ALG`, as the federation endpoints sign;
+  it was always RS256 (F-0039).
+- The Entity Configuration's `jwks` carries the current key and every retired key still in its grace and not revoked,
+  each `kid` once; with `OIDF_FEDERATION_HISTORICAL_KEYS` off the retired keys are kept in memory for the same grace.
+  When PingFederate goes back to a key a node already moved off, the key that node signed with until then stays in
+  its `jwks` for the grace too. A key PingFederate replaces under the same `kid` signs from the next read, with a
+  warning in the log.
+- New events `federation.key.changed` (audited: the old `kid`, the new one and the algorithm) and
+  `federation.key.read_failed`. A key that cannot be read leaves the last one signing for at most 300 seconds past its
+  refresh, then signing answers 503.
+- The init-params `signingAlgorithm` of the federation servlet and of `/federation/register` are removed.
+
+- A key PingFederate starts signing with is published in the Entity Configuration's `jwks` within 30 seconds, and the
+  federation signs with it only once it has been published for `OIDF_FEDERATION_KEY_ACTIVATION_DELAY_SECONDS` (new,
+  default 3600, 0 to 86400), as OpenID Federation 1.0 §11.2 orders a rotation (F-0011).
+- One node at a time - the holder of the new `federation-key-observer` lease - records the keys PingFederate
+  publishes in `federation_key_observed` (migration V104, federation family) on the database's clock, and moves the
+  cluster's active key; every node signs with that key. Nothing else writes the key history now, so two nodes reading
+  different keys can no longer turn it back.
+- The active key never goes back to an older key while PingFederate still publishes the newer one; it returns to an
+  older key only after the newer has gone unpublished for a whole delay (`federation.key.returned`).
+- A node whose PingFederate has no private key for the active key signs with its own current key and publishes it
+  (`federation.key.activation_skipped`).
+- New events `federation.key.observed`, `federation.key.activated` (audited), `federation.key.returned` (audited, WARN)
+  and `federation.key.activation_skipped`; new metrics `oidf_federation_key_activations_total{kind}` and
+  `oidf_federation_key_activation_skipped_total`.
+- A Trust Mark is served again from the cache only while it was signed with the key the federation signs with now: a
+  key switch mints the next mark anew. An own mark signed with a pending key or a retired key in its grace has status
+  `active`, one signed with a revoked key `invalid`.
+- `OIDF_FEDERATION_KEY_HISTORY_GRACE_SECONDS` must be at least the longest of every Trust Mark type's
+  `lifetime_seconds`, `OIDF_REGISTRATION_MAX_TTL_SECONDS` and an Entity Statement's 3600 seconds.
+
+- A Subordinate Statement about a foreign subordinate carries the keys pinned for it, never the keys its own Entity
+  Configuration lists (finding F-0012, plan item S7a): whoever answered at the subordinate's URL used to control the
+  keys PingFederate vouched for. The list endpoint's `entity_type` and `intermediate` filters use the pinned Entity
+  Types and Intermediate flag. The refresher still looks at each subordinate's live configuration every four
+  minutes, on every node, but only reports what it sees (`federation.subordinate.live_differs`).
+- Two new settings in the [federation-entity](docs/configuration/federation-entity.md) catalogue:
+  `OIDF_FEDERATION_SUBORDINATE_STORE` (`settings`, the default, or `database`) and `OIDF_FEDERATION_SUBORDINATE_PINS`
+  (`{"<entity id>": {"jwks", "entity_types", "intermediate"}}`, parsed strictly). Both make FEDERATION present.
+- Migration V105 (`federation_subordinate`, `federation_subordinate_key_change`, `federation_subordinate_audit_log`)
+  in the federation family, for the database store.
+- New operator routes: `GET /federation/admin/subordinates` (`?entity_id=` with this node's last look at its URL),
+  `GET /subordinates/audit` on `oidf.admin.read`; `POST /subordinates` (enrol), `/subordinates/keys` (re-pin, with the
+  version read and a reason) and `/subordinates/remove` on `oidf.admin.subordinates`. Keys are pinned only when the
+  subordinate's live configuration is self-signed with one of them (422 otherwise), unless `force` is true with a
+  reason. Events `federation.subordinate.enrolled`, `.changed`, `.removed`, `.refused` (audit) and
+  `.unpinned_served`; counter `oidf_federation_subordinate_changes_total{action, outcome}`.
+
+- A subordinate's pin now changes only on an operator's approval or at the end of a held rollover, and never because
+  of what answers at its URL (finding F-0012, plan item S7b). Under the database store, `POST
+  /federation/admin/subordinates` and `/subordinates/keys` answer 202 with the change's `seq` instead of applying
+  it; `POST /subordinates/remove` still applies at once, and withdraws any change waiting for that subordinate.
+- New operator routes: `GET /federation/admin/subordinates/changes[?status=&entity_id=]` on `oidf.admin.read`;
+  `POST /subordinates/changes/approve` and `/reject` (`{"seq", "reason"?}`) on `oidf.admin.subordinates.approve`;
+  `/withdraw` on `oidf.admin.subordinates`, by the operator who asked only. Approval applies a change only if the pin
+  has not moved since (409 `moved`); two-person approval refuses the requester (409 `same_actor`).
+- The subordinate monitor: one node, elected by the `federation-subordinate-monitor` lease, looks at each pinned
+  subordinate every 240 s and records what it saw (migration V106); a configuration self-signed by a pinned key and
+  listing another set becomes a rollover held for a day, then applied. States `IN_SYNC`, `ROLLOVER_PENDING`,
+  `DIVERGED`, `UNREACHABLE`; FEDERATION's health part `subordinate-monitor` (READY or DEGRADED, never FAILED); gauge
+  `oidf_federation_subordinates{state}`.
+- Events `federation.subordinate.state_changed`, `.rollover_requested`, `.rollover_applied`, `.change_requested`,
+  `.change_approved`, `.change_rejected`, `.change_withdrawn`, `.change_expired` and `.approval_refused`;
+  `federation.subordinate.enrolled` and `.changed` are now emitted when the change is approved.
+- Five new settings in the [federation-entity](docs/configuration/federation-entity.md) catalogue:
+  `OIDF_FEDERATION_SUBORDINATE_ROLLOVER_HOLD_SECONDS` (86400; production refuses less under the database store),
+  `OIDF_FEDERATION_SUBORDINATE_APPROVAL` (`single` or `two-person`), `OIDF_FEDERATION_SUBORDINATE_APPROVAL_TTL_SECONDS`
+  (604800), `OIDF_FEDERATION_SUBORDINATE_MONITOR_SECONDS` (240) and `OIDF_FEDERATION_SUBORDINATE_UNREACHABLE_SECONDS`
+  (900).
+- `tools/pin-subordinates.py`: `capture` prints subordinates' public keys, thumbprints, Entity Types and Intermediate
+  flag as pins or enrolment bodies; `compare` diffs pins with what is enrolled.
+
+- Every module with Java main code runs SpotBugs 4.10.4 (`spotbugs-maven-plugin` 4.10.4.1) with the find-sec-bugs
+  1.14.0 plugin at `verify`, effort Max and threshold Low, so `mvn verify` and the Build workflow's `java` job fail
+  on a finding that `build/spotbugs/exclude.xml` does not match (F-0460).
+- `build/spotbugs/exclude.xml` holds the scope rules, three pattern groups switched off with their reasons, and the
+  baseline of what the first run found on 2026-10-05, grouped by pattern with what was checked.
+- F-0466 records request values that reach log lines without `LogSafe`.
+
+- Each JDBC store checks its migration family before PingFederate publishes it (plan item DB-4): the SSF `tables`
+  store (`ssf`), the authority's hosted entities, Trust Marks and key history (`federation`) and the agent registry
+  (`agent`) read their rows of `oidf_schema_history` and compare them with the scripts the release's own jars carry.
+  Behind - a script pending, a gap, or no history - is `FAILED_CONFIG` in every profile, naming the family, both heads
+  and the `oidf-db-migrate.jar` command; drift is `FAILED_CONFIG` under production and a WARN under development; a
+  database ahead of the release (a rolling upgrade) starts with one WARN. Each check emits the catalogued
+  `platform.schema.checked` event. No switch turns it off
+  ([docs/operator/database-migrations.md](docs/operator/database-migrations.md#the-start-up-check)) (F-0018, closed).
+- The SSF `ldm` store checks the Identity Object Model's own ledger, `idm.schema_migration`, by name:
+  `0000-base-schema` and `0001-add-shared-signals-ssf`, and `002-backfill-may-attrs` and
+  `006-add-agent-instance-registry` with `receiverInstanceRegistry` on.
+- `oidf-db-migrate.jar grants` also grants `SELECT` on `oidf_schema_history`, and `grants --apply` creates the history
+  table first when it runs before the first `migrate`.
+- PingFederate's image stages `migrations-<version>.jar` beside `platform-<version>.jar`, which now depends on it.
+  The plugins that shade platform (RAR, the instance-registry datasource, the CIBA simulator) and
+  `oidf-preflight.jar` leave the check out.
+
+- **`tools/build-showcase-docs.mjs --public`** - renders only the Markdown files the public tree exports into
+  `showcase/docs.js`, keyed by source path as before, and keeps the text of any link to a file the export does not
+  carry. The build without the flag is unchanged and remains the internal page's.
+- **`tools/export-public.py --list-sources`** - prints the source path of every file the export carries, from the
+  manifest's own selection code; the public build reads it.
+- **`tools/build-microsite.py`** - refuses a `docs.js` not built with `--public`, or one carrying a document the
+  manifest no longer exports, before it writes anything.
+- **The showcase page** - with a public `docs.js` its documentation index lists only what it carries, and a link
+  to any other document says it is not published on this site. `tools/check-showcase-links.py` refuses a public
+  `docs.js` and asks for the full build.
+
+- attestation-issuer reads `OIDF_ATTESTER_MAX_ISSUED_TTL`, `OIDF_ATTESTER_SIGNING_JWK`,
+  `OIDF_ATTESTER_FEDERATION_ENTITY` and `OIDF_ATTESTER_CIMD_URL` through its settings catalogue (F-0420): the federation
+  entity and the CIMD document must be an http or https URL with a host.
+- `OIDF_REGISTERED_CLIENTS_ENABLED` is read strictly (F-0421): anything but `true` or `false` leaves
+  `/federation/registered-clients` off, with an ERROR naming it.
+- `OIDF_EVENTS_AUDIT` and `OIDF_EVENTS_MAX_VALUE_LENGTH` are read through the `pf-audit` catalogue (F-0422). A value of
+  the audit switch that is neither `true` nor `false` still keeps audit on, now with an ERROR, and a legacy spelling
+  (`yes`, `off`, `0` ...) keeps it on too; a value cap that is not a whole number from 16 is refused with an ERROR.
+- `OIDF_AUTHORITY_ADMIN_TOKEN`'s catalogue entry moves from pf-integration's `hosted-entities` to platform-pf's
+  `operator-auth`, the component that reads it; pf-integration's servlets keep an `adminToken` init-param entry of
+  their own (F-0422).
+- The RAR plugin reads `OIDF_RAR_EXTRA_TYPES` through its catalogue (F-0423): a list of nothing adds no type, with a
+  SEVERE naming it.
+- `docs/configuration/README.md` says when each setting takes effect: restart-only, which reads happen at deploy, which
+  on first use, and which while PingFederate runs (F-0435).
+- The image carries PgJDBC 42.7.13, PostgreSQL's JDBC driver, in `server/default/lib`, checked against a recorded
+  sha256, with its BSD-2-Clause licences in `/usr/local/share/licenses/pgjdbc/` (F-0330).
+- The descriptions of `OIDF_AUTO_REGISTRATION_REQUIRE_PKCE`, `OIDF_AUTO_REGISTRATION_ENCRYPTED_REQUEST_OBJECTS` and
+  the `pkce-off` risk, and `OIDF_ATTESTER_CIMD_URL`'s "when it's wrong", say what the code does (F-0341, F-0296).
+
+- A governed setting of a catalogue that belongs to several components now refuses only the components whose code
+  reads it (F-0297): `OIDF_PDP_FAIL_OPEN=true` without its risk refuses `FEDERATION`, `AUTO_REGISTRATION` and
+  `HOSTING`, no longer `ATTESTATION_AUTH`; the attester binding switch refuses `ATTESTATION_AUTH` alone; the SSF
+  transmitter's governed settings refuse `SSF` alone. `tools/settings-scan.py` refuses a governed entry of such a
+  catalogue that names no components.
+- `OIDF_SSF_RECEIVER_POLL_URL` and `OIDF_SSF_RECEIVER_JWKS_URL` are forbidden as http in production, as the receiver's
+  other URLs are, and so is an unset JWKS URL whose default (`<receiverExpectedIssuer>/pf/JWKS`) is http (F-0364,
+  F-0570): RFC 8936 §3, "The SET delivery method described in this specification is based upon HTTP over TLS
+  [RFC2818]".
+- A receiver-only setting that does not parse or is refused at read, and a combination of the receiver's settings that
+  does not hold, now cost `SSF_RECEIVER` alone; the transmitter starts (F-0363).
+- The receiver's JWKS is a start dependency: unreachable at start, `SSF_RECEIVER` is `FAILED_DEPENDENCY` and retried;
+  unreachable once ready, `DEGRADED` (event `ssf.receiver.jwks_failed`) until a fetch succeeds (F-0331).
+- `OIDF_SSF_KAFKA_ENABLED=true` with a Kafka publisher that cannot be built stops SSF, `FAILED_CONFIG` or
+  `FAILED_DEPENDENCY`, naming Kafka; it no longer runs `READY` with nothing published (F-0332).
+- `oidf-preflight.jar` and `Preflight` judge what a server refuses when a component reads a setting - a removed name, a
+  value its type refuses, a name set beside its `_FILE` variant or its superseded name - as `REFUSED (at read):`
+  lines, under either profile (F-0427). `--format docker` reads an env file as `docker run --env-file` does, and the
+  default reading warns of each quoted value (F-0426). `--process` names the process a file is for and judges that
+  process's catalogues (F-0425).
+
+- The resolve endpoint holds a subject's chain and its Trust Marks to one resolution budget (F-0280). A response whose
+  marks the budget cut short is answered without them and not kept, so the next request gets the full answer.
+  Registration has shared one budget since 0.6.0.
+- `Fapi2Profile` is mapped over `/as/device_authz.oauth2` as well (F-0320): PingFederate 13.1.3 authenticates a
+  client there by assertion, and FAPI 2.0 §5.3.2.1 holds the assertion's `aud` to the issuer at every endpoint.
+- Under production, a due renewal at the authorization or PAR endpoint whose request object is encrypted is deferred
+  while the registration is current, rather than refused 400 (F-0340). `federation.registration.refresh_deferred`
+  says so with the reason `encrypted_request_object`, once a renewal interval. An expired registration is still
+  refused 400 `invalid_request_object`.
+- `DELETE /federation/agents/<id>` answers 409 `stale_update` when another operator's change to the entity committed
+  first, as the admin API does, rather than 500 (F-0380).
+- A Trust Mark issued to hosted entities only checks its subjects in one registry read, and the list endpoint's
+  `trust_marked` and `trust_mark_type` filters answer every subordinate in a fixed number of reads (F-0381).
+- The resolve cap counts the client address behind a proxy `OIDF_TRUSTED_PROXIES` lists (F-0382), an IPv6 caller by
+  its /64 as the other per-caller limits do (`OIDF_RATE_LIMIT_IPV6_PREFIX`, F-0391), and counts every resolution the
+  cache could not answer, not distinct subjects (F-0383).
+- The challenge endpoints answer a wrong method with fixed text and no longer echo the caller's (F-0396).
+- `HostedEntity.withMetadataPolicy` keeps a SELF_SIGNED entity's keys and published configuration, so
+  `POST /federation/admin/entities/metadata-policy` sets its policy rather than answering 400 (F-0437).
+- Five public test hooks are package-private behind `*TestAccess` classes; platform and client-attestation publish
+  test-jars (F-0432).
+- The public tree carries `docs/findings.md`, a digest of every finding its documents name, and a link to a finding
+  lands on its entry there rather than losing its link (F-0445).
+
+- The start-up audit's `insecure TLS` line lists every copy of platform in the JVM, naming each: `webapp`, `engine`,
+  or a plugin's relocation such as `rar` for the RAR plugin's "Skip TLS verification (dev only)"
+  ([F-0164](docs/findings.md#f-0164)).
+- Managed executors start only in the copy the webapp's lifecycle listener marked; the engine's copy starts none but
+  its Redis write watchdog (`ManagedExecutors.copyLocal`) ([F-0200](docs/findings.md#f-0200)).
+- A client registered, updated or disabled through this project has its attestation policy read again at once, in
+  the filter's and the engine criterion's copies ([F-0300](docs/findings.md#f-0300)).
+- A Kubernetes token's namespace and service account are held to Kubernetes' DNS-1123 grammar before they become
+  SPIFFE path segments ([F-0366](docs/findings.md#f-0366)).
+- The client attestation service metadata, the SSF configuration document and the federation endpoints send CORS
+  headers only to listed origins; `*` is refused. New `OIDF_SSF_CORS_ORIGINS`; `corsAllowOrigin` is now an origin list
+  with no default ([F-0390](docs/findings.md#f-0390)).
+- Per-caller rate limits count an IPv6 client by its /64 (new `OIDF_RATE_LIMIT_IPV6_PREFIX`, 32-128)
+  ([F-0391](docs/findings.md#f-0391)).
+- The attestation issuance endpoint answers only CAS §4.6's codes and statuses ([F-0392](docs/findings.md#f-0392)).
+- gm-api's grant-management metadata believes forwarding headers only from a proxy in `OIDF_TRUSTED_PROXIES`
+  ([F-0393](docs/findings.md#f-0393)).
+
+- A token exchange whose `requested_token_type` is `urn:ietf:params:oauth:token-type:id-jag` and which carries
+  `authorization_details` is refused with `400 invalid_authorization_details` by the new `IdJagDetails` filter on
+  `/as/token.oauth2`, for every client and in every deployment profile. PingFederate 13.1.3 neither validates nor
+  enriches those details and signs them into the ID-JAG, so neither the RAR processor, the attestation ceiling nor
+  the PDP saw them (F-0325, high).
+- Each refusal is the audited event `idjag.details.refused`, in pf-integration's new `idjag` event catalogue.
+- `RarEntitlement` and `ClientAttestationException.accessDenied` / `ACCESS_DENIED` are removed from
+  libs/client-attestation. Nothing has called them since 0.4.0; the token gate and the attester use libs/rar-model
+  (F-0100, low).
+
+- A DPoP proof to an operator API must carry a nonce the server issued: a proof without one is a 401
+  `use_dpop_nonce` with the nonce in `DPoP-Nonce` (RFC 9449 §9), and the nonce secret is shared through Redis when it
+  is configured. `OIDF_OPERATOR_DPOP_NONCE` (default `true`) turns it off in development; production refuses `false`
+  (F-0276). device-enrolment's operator client answers the challenge.
+- gm-api reads the `act` claim through rs-validation's `ActChain`: the legacy string form, a level that is not a JSON
+  object or names no actor, a chain deeper than 10 and an unparseable claim are an invalid token, as they are for
+  rs-validation (F-0228). gm-api.war bundles rs-validation, so its health detail and `/agentic-identity/info` load
+  the operator authenticator rather than answering 503 (F-0310).
+- `OPERATOR_API` is present on the operator-auth settings (`OIDF_OPERATOR_AUDIENCE`, `OIDF_OPERATOR_BASE_URL`,
+  `OIDF_OPERATOR_AUTH_MODE`, `OIDF_OPERATOR_JWKS_URL`, `OIDF_OPERATOR_INTROSPECTION_ENDPOINT`), so production asks for
+  `OIDF_OPERATOR_API_ENABLED` when they are set (F-0312); `OIDF_AUTHORITY_ADMIN_TOKEN`'s catalogue entry names
+  `components: [OPERATOR_API]`, so production's start-up sweep refuses the operator API naming the token (F-0311) The
+  entry used to inherit the catalogue's default components, HOSTING and OPERATOR_API: HOSTING is no longer refused
+  while the static bearer is set, and its operator routes still answer 503 naming the token.
+- The attester emits `attestation.issuer.client_refused`, audited, for a client whose `attestation_*` configuration is
+  refused: the client, the property and a reason, never the value; once per client until the refusal changes
+  (F-0336).
+- The RAR plugin's `rar.decision.permitted`, `.denied` and `.failopen` are audit events: the plugin bundles
+  platform-pf's audit sink, which writes them to PingFederate's audit log through the SDK's `LoggingUtil`, protocol
+  `RAR` (F-0376).
+- A removed plugin field may be catalogued `"ignored": true`, and the generated configuration pages' Removed tables
+  gain a "When still set" column: the RAR plugin's "Deny unless PERMIT" now reads Ignored, which is what the plugin
+  does (F-0375).
+
+- RFC 8936 long polls are held in PingFederate (F-0360): the war assembler marks the twelve stock filters on
+  `/ssf/poll`'s chain `async-supported`, each named with its reason in `build/pingfederate/filters.xml`'s new
+  `<async path="/ssf/poll">` block, and `OidfCorrelation` declares it. The assembler refuses a stock filter on the chain
+  that is not named (so a filter a new PingFederate adds fails the build), a name not on it, a stock filter that says
+  false, and a stock async servlet a marked filter reaches without a reason; it prints `[async]` or `[sync]` for each
+  filter of a chain. A held poll's answer carries the request's `traceparent`.
+- The SSF SCIM list is one filtered, paged query on the `tables` store - a `COUNT(*)`, one page and its streams - and a
+  user's streams one indexed read, whatever the number of streams (F-0388). `userName` is held unique by its RFC 7613
+  key (width-mapped, lower-cased, NFC): a name another user holds is 409 `uniqueness` on `POST`, `PUT` and `PATCH`,
+  backed by a unique index. New event `ssf.scim.username_conflict`.
+- shared-signals' `CaepRiscEvents.assuranceLevelChange` takes a namespace and a direction and checks both (CAEP 1.0
+  §3.4.1); the transmitter builds its assurance-level-change with it (F-0400).
+- The logout signal is raised when the user confirms PingFederate's sign-off, and not when they cancel or leave the page
+  (F-0401). The logout filter records a pending sign-off; a new filter, `SsfLogoutConfirm` over `*.ping`, raises
+  session-revoked on PingFederate's confirmation. New `ssf.logout.signal.refused` reasons `declined` and `not_confirmed`.
+- Verification SETs and stream-updated notices carry a `txn` of their own (SSF 1.0 §4.1.9, F-0403).
+- SSF migration V310: `ssf_stream_subjects (subject_key)` index, `user_name_key` and `email_key` columns with a unique
+  index on `user_name_key`, and the table `ssf_logout_pending`.
+
+- Every copy of the modules reads its cluster topology: `OIDF_CLUSTER_MODE` (new, in the
+  [cluster-topology](docs/configuration/cluster-topology.md) catalogue: `STANDALONE`, `CLUSTERED_ENGINE`,
+  `CLUSTERED_CONSOLE` or `CLUSTERED_DUAL`, any case), else PingFederate's `pf.operational.mode`. Blank, unrecognised or
+  the two disagreeing is an unknown topology, which the production profile refuses for every component (plan item C-1).
+- Under production a clustered node refuses every store that would keep its state in the node's memory, even with
+  `in-memory-state` accepted; FEDERATION and AUTO_REGISTRATION unless PingFederate keeps OAuth clients in a database
+  (`ClientManager.isBackendDatabase()`); SSF_RECEIVER and AUTO_REGISTRATION unless a JDBC lease backend is registered (LEASE);
+  and SSF on any dialect but `tables` (S10A).
+- A `CLUSTERED_CONSOLE` node starts no background job through the managed executors.
+- The federation endpoints' spent client assertions (when endpoint authentication is on), automatic registration's
+  spent request objects and the OGNL criterion's attestation stores are held to the in-memory rule; the criterion
+  denies the token where the rule says no (F-0335).
+- A full in-memory replay cache refuses new proofs instead of forgetting a live jti (F-0306): attestation, the
+  attester and automatic registration answer `temporarily_unavailable` (503), the federation endpoints 503. Automatic
+  registration also answers 503, not 500, when Redis cannot record a request object's jti.
+- The agent registry's JDBC store is held to PostgreSQL (F-0337), and the admin API's Trust Mark routes answer 503
+  while the Trust Mark registry would be in memory where the rule says no (F-0370).
+- The start-up audit's `topology` line, `/agentic-identity/info`'s new `topology` object and the new event
+  `platform.topology.resolved` report the mode, its source, the node index, the client storage and the lease backend.
 
 ## [0.6.1] - 2026-10-05
 
@@ -156,22 +671,22 @@ call; the image no longer configuring the deployment; reproducible jars and wars
   [`trusted-proxies`](docs/configuration/trusted-proxies.md).
 - Both attestation challenge endpoints, the attester's issuance endpoint and the operator APIs' failed-authentication
   limit count callers by that client address, so behind a listed proxy each client has its own allowance
-  (F-0116, F-0275).
-- `POST /federation/attestation` (plan item H-ATT-2, F-0060) reads at most
+  ([F-0116](docs/findings.md#f-0116), [F-0275](docs/findings.md#f-0275)).
+- `POST /federation/attestation` (plan item H-ATT-2, [F-0060](docs/findings.md#f-0060)) reads at most
   `OIDF_ATTESTER_MAX_BODY_BYTES` (32768, 4096 to 262144) and answers `413 invalid_request` beyond it; allows each client
   address `OIDF_ATTESTER_ISSUANCE_REQUESTS_PER_MINUTE` (60) requests a minute, in Redis when `OIDF_REDIS_URL` is set,
   and answers `429 temporarily_unavailable` with `Retry-After` past it; answers every failure, an unexpected exception
   or `Error` included, with an error code and an `X-Correlation-Id` header, a `5xx` or `invalid_client` with a fixed
   description instead of the exception's text; and answers other methods `405`. The codes are CAS §4.6's except
   `invalid_svid`, `spiffe_id_not_authorized` and `invalid_client` at 400, kept unchanged
-  (F-0392).
+  ([F-0392](docs/findings.md#f-0392)).
 - The attester matches evidence against a cached index of PingFederate's attestation clients, rebuilt every
   `OIDF_ATTESTER_CLIENT_INDEX_REFRESH_SECONDS` (30) and after a miss at most once every 5 s, instead of reading every
   PingFederate client on every request. While PingFederate's clients cannot be read the index it has is served for at
   most four intervals, then the endpoint answers `503 temporarily_unavailable`.
 - `/.well-known/client-attester` and `/federation/attester-configuration` build their URLs from `X-Forwarded-*` only
   when a listed proxy sent them, and send `Access-Control-Allow-Origin` only to the origins
-  `OIDF_ATTESTER_CORS_ORIGINS` lists, none by default, for `GET` (F-0061).
+  `OIDF_ATTESTER_CORS_ORIGINS` lists, none by default, for `GET` ([F-0061](docs/findings.md#f-0061)).
 
 - Removed the federation code nothing called (plan item H-FED-10, F-0052): `ClientEntityAuthorizer`; the trust
   controller gateway's `fetchEntityConfiguration()`, `fetchMembers()` (its client for `/list`) and both
@@ -248,7 +763,7 @@ call; the image no longer configuring the deployment; reproducible jars and wars
   its registration response reports the defaults (H-FED-5, F-0047).
 
 - `JwtCodec.parseUnverifiedClaims` returns an `UnverifiedClaims` (plan item H-JOSE-1,
-  F-0063): the claims of a JWT whose signature nobody has checked, typed so that they
+  [F-0063](docs/findings.md#f-0063)): the claims of a JWT whose signature nobody has checked, typed so that they
   cannot be passed where verified claims are expected, every accessor named `unverified...`. Every call site is
   classed in the oidf-jose README ("Reading a JWT before its signature is checked"): routing, refuse-first or logging.
 - Every `JwtCodec` verifier - the claim verifiers, `verifySignature` and `verifyAttestationPop` - refuses `none` and
@@ -256,12 +771,12 @@ call; the image no longer configuring the deployment; reproducible jars and wars
   `"use": "enc"` (RFC 8725 §3.1, §3.2; RFC 7517 §4.2). The `verifyAgainstKeys` and `verifyAgainstInlineJwks` overloads
   that take no `VerificationPolicy`, deprecated here, are removed in the same release by the H-FED-10 bullet above (HFEDD).
 - A configured subordinate's keys are asserted in a Subordinate Statement only once its Entity Configuration verifies
-  under one of them (F-0415). This is the OpenID Federation §3.2 check, not pinning: a
+  under one of them ([F-0415](docs/findings.md#f-0415)). This is the OpenID Federation §3.2 check, not pinning: a
   party that answers at the subordinate's URL still signs with the keys it lists, which stays open as
-  F-0012. The trust mark status endpoint decides on the verified
+  [F-0012](docs/findings.md#f-0012). The trust mark status endpoint decides on the verified
   mark, the Trust Mark validator verifies the anchor configuration it reuses against the anchor's pinned keys, and a
   request object's replay window reads its verified `exp` and `jti`.
-- `LocalJwkSigner` (plan item H-JOSE-2, F-0064, F-0112)
+- `LocalJwkSigner` (plan item H-JOSE-2, [F-0064](docs/findings.md#f-0064), [F-0112](docs/findings.md#f-0112))
   signs `PS256`, `PS384` and `PS512` with an RSA key, and refuses, when it is built, an RSA key under 2048 bits, an EC
   key off P-256, P-384 and P-521, and an EC key whose declared `alg` is another curve's.
 - The attestation filter's start function builds every client's bridge signing key, and again every ten minutes; a
@@ -1080,7 +1595,7 @@ and the image built, tested and scanned in CI. Notes: [docs/releases/0.5.0.md](d
   receiver's and introspection's insecure-TLS switches, device-enrolment's `PF_AUTHORITY_INSECURE_TLS` and the
   harness ask it; each use logs one WARN naming its setting. What each switch trusts is unchanged: any
   certificate chain, and the certificate must still name the host dialled - except in the harness, which turns
-  the JDK's host-name check off for every run (F-0162).
+  the JDK's host-name check off for every run ([F-0162](docs/findings.md#f-0162)).
 - `tools/trust-scan.py`, a new step in the lint job, fails on a trust-all trust manager, an always-true
   hostname verifier, a null endpoint identification algorithm or the JDK's hostname flag anywhere else in main
   code (F-0042, CodeQL alerts 4 to 9).
@@ -1418,9 +1933,9 @@ hygiene, and one PingFederate node only until 0.7.0
 - **The containment model wired into the token gate and the attester** (S1b, design S-1, blocker B1; PR #37) -
   the authorization server's token gate and the attester compare every `authorization_details` field with
   `libs/rar-model`, a refused request is 400 `invalid_authorization_details`, and an instance ceiling keeps what
-  its client's constrains. Closes F-0034 and F-0038,
-  and with S1c F-0001; adds F-0100 and
-  U-0110.
+  its client's constrains. Closes [F-0034](docs/findings.md#f-0034) and [F-0038](docs/findings.md#f-0038),
+  and with S1c [F-0001](docs/findings.md#f-0001); adds [F-0100](docs/findings.md#f-0100) and
+  [U-0110](docs/findings.md#u-0110).
 
 - **The RAR plugin asks the containment model** (S1c; PR #36) - the plugin shades and relocates `libs/rar-model`
   and asks it every containment question - a request before the PDP, the PDP's answer after it (narrow, never

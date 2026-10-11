@@ -76,6 +76,8 @@ die() { log "FATAL: $*"; exit 1; }
 sha256_of() {
     if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
 }
+# FILE's mode and numeric owner, as `-rw------- owner 1000:1001`: busybox and GNU stat, then macOS's.
+mode_owner() { stat -c '%A owner %u:%g' "$1" 2>/dev/null || stat -f '%Sp owner %u:%g' "$1"; }
 # An age file starts with its version line, or with the PEM header of the armor `age -a` writes (the C2SP
 # age spec: RFC 7468 encoding, label "AGE ENCRYPTED FILE"; both seen from age 1.3.1 on 2026-09-27, which
 # decrypts either without being told which). Nothing else is decrypted. The bytes stay in a pipe rather
@@ -124,6 +126,15 @@ elif [ -f "$ARCHIVE" ]; then
     SOURCE="$ARCHIVE"
 else
     SOURCE=""
+fi
+# An archive this user cannot read is neither ciphertext nor plaintext - is_age's `head` fails, and without this
+# the file was called a plaintext archive (C-7's first Linux run: a host file 0600 to uid 1000, bind-mounted, and
+# PingFederate running as 9031). Say what it is: the path, who we are, the file's mode and owner.
+if [ -n "$SOURCE" ] && [ ! -r "$SOURCE" ]; then
+    die "the config archive $SOURCE exists but cannot be read by uid $(id -u) (gid $(id -g)): it is $(mode_owner "$SOURCE"). Make it readable to this uid - a bind-mounted host file keeps the host's owner and mode, which Docker Desktop hides and Linux does not; an age-encrypted archive is ciphertext and may be 0644"
+fi
+if [ -n "${PF_ARCHIVE_AGE_KEY_FILE:-}" ] && [ -f "$PF_ARCHIVE_AGE_KEY_FILE" ] && [ ! -r "$PF_ARCHIVE_AGE_KEY_FILE" ]; then
+    die "PF_ARCHIVE_AGE_KEY_FILE=$PF_ARCHIVE_AGE_KEY_FILE exists but cannot be read by uid $(id -u) (gid $(id -g)): it is $(mode_owner "$PF_ARCHIVE_AGE_KEY_FILE"). Hand this uid its own copy (0400) rather than widen the host file's mode"
 fi
 
 # --- integrity, before the archive is decrypted or imported ---

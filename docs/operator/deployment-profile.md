@@ -48,6 +48,7 @@ its risk, as a comma-separated list of ids, each alone or with the last day it h
 | `OIDF_AUTO_REGISTRATION_REQUIRE_PKCE` | `false` | `pkce-off` | the same |
 | `OIDF_FEDERATION_RESOLVE_DISCOVERY` | `any` | `resolve-any` | `FEDERATION`, `HOSTING` |
 | `OIDF_EVENTS_AUDIT` | `false` | `audit-off` | every component |
+| `OIDF_LEASE_BACKEND` | `redis` on a clustered node (from 0.7.0) | `redis-lease` | `SSF`, `SSF_RECEIVER`, `AUTO_REGISTRATION` ([clustering.md](clustering.md#leases)) |
 
 An entry that is empty, unknown, expired, repeated, or undated where a date is needed is not accepted; the start-up
 audit lists it, and the switch that needed it refuses its components.
@@ -65,8 +66,10 @@ misspelling is the usual cause. An `OIDF_*` name under no family is only a warni
 governed value: production cannot tell what it meant.
 
 **Refusals in code.** Some conditions are not settings: a store that keeps its state in memory needs the
-`in-memory-state` risk in production. The packages that own those stores add them from 0.6.0 on; each is listed in
-the start-up audit under `code refusals`.
+`in-memory-state` risk in production on a standalone node, and from 0.7.0 is refused on a clustered node whatever the
+risks say; and from 0.7.0 the cluster topology itself - unknown, or clustered without JDBC client storage or a lease
+backend - refuses components ([clustering.md](clustering.md)). The packages that own those stores add them from 0.6.0
+on; each is listed in the start-up audit under `code refusals`.
 
 **At read.** An init-param, a plugin's field and a client's extended property are not in the environment, so the
 start-up sweep cannot see them. Each is refused when its reader reads it through the settings catalogue - in 0.6.0
@@ -97,7 +100,7 @@ boot logged the risk as accepted, refused nothing, and the Entity Configuration 
 **The exception: FAPI.** A `FAPI` component that is not serving answers 503 at the endpoints its filter covers to the
 clients `OIDF_FAPI2_CLIENTS` names (to every client when it is `*`), and passes every other client's request to
 PingFederate: package S9B has the filter read its client list apart from the rest of its start
-(F-0270, closed). A violation that refuses every component - the JVM-wide hostname flag,
+([F-0270](../findings.md#f-0270), closed). A violation that refuses every component - the JVM-wide hostname flag,
 `OIDF_EVENTS_AUDIT=false` without `audit-off` - therefore closes PingFederate's token endpoint to those clients. Before
 S9B it closed it to every client: on the rig with `-Djdk.internal.httpclient.disableHostnameVerification=false`
 in `JAVA_OPTS` (2026-09-30), `ATTESTATION_ISSUER`, `AUTO_REGISTRATION`, `FAPI` and `FEDERATION` were `REFUSED`, the
@@ -109,7 +112,7 @@ component switched off is never refused.
 one switched off with `OIDF_<COMPONENT>_ENABLED=false` stays disabled and never counts against readiness.
 
 **The SSF servlets** start as `SSF`'s part since package ST5C, with a gate on every endpoint: a refused `SSF` or
-`SSF_RECEIVER` no longer configures the transmitter, and its endpoints answer 503 (F-0295,
+`SSF_RECEIVER` no longer configures the transmitter, and its endpoints answer 503 ([F-0295](../findings.md#f-0295),
 closed). The boot above was made before that change and showed `SSF READY`. On the v0.6.0 release's rig (2026-10-01, the code at
 `600fa6b5`, production, the flag in `JAVA_OPTS`), `SSF` and `SSF_RECEIVER` were `REFUSED` with every other component
 switched on or inferred, `ATTESTATION_AUTH`, switched off, stayed `DISABLED`, and the token endpoint answered 200 to a

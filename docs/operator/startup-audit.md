@@ -25,7 +25,7 @@ INFO  [com.pingidentity.ps.oidf.platform.pf.lifecycle.LifecycleListener] Start-u
   code refusals:  none
   profile notes:  none
   legacy values:  none
-  insecure TLS:   none
+  insecure TLS:   none; later plugin uses: server.log WARN only
   JDK host names: checked
   components:     ATTESTATION_AUTH DISABLED
                   AUTO_REGISTRATION FAILED_CONFIG: FrontChannelAutoRegistrationFilter: OIDF_FEDERATION_TRUST_ANCHOR_JWKS is unset: ...
@@ -42,20 +42,20 @@ INFO  [com.pingidentity.ps.oidf.platform.pf.lifecycle.LifecycleListener] Start-u
 | Line | Meaning | What to look for |
 |---|---|---|
 | `version` | this repository's release, from the jars | the release you meant to deploy |
-| `commit` | the commit it was built from | `unknown` for now: no build records it where PingFederate can read it (F-0190) |
+| `commit` | the commit it was built from | `unknown` for now: no build records it where PingFederate can read it ([F-0190](../findings.md#f-0190)) |
 | `PingFederate` | PingFederate's version, from `pf-commons.jar` | the version the release supports (13.1.3) |
 | `Java` | the JVM PingFederate runs on | |
 | `profile` | `development` or `production`, and what `OIDF_DEPLOYMENT_PROFILE` said | `production` everywhere but a rig or a demo; unset, blank or misspelt reads as production |
-| `topology` | `standalone` | always `standalone` until 0.7.0 tells a cluster from one node |
+| `topology` | from 0.7.0, the node's mode (`STANDALONE`, `CLUSTERED_ENGINE`, `CLUSTERED_CONSOLE`, `CLUSTERED_DUAL` or `UNKNOWN`), where it was read (`OIDF_CLUSTER_MODE` or `pf.operational.mode`), PingFederate's node index, where PingFederate keeps OAuth clients (`database` or `files`) and the lease backend; before 0.7.0 always `standalone` | `UNKNOWN`, which production refuses, and on a clustered node `files` or `lease backend none`, which refuse the components [clustering.md](clustering.md) lists |
 | `accepted risks` | each risk `OIDF_ACCEPTED_RISKS` accepts, its expiry and what it lets happen | anything you did not mean to accept |
 | `risk refusals` | how many `OIDF_ACCEPTED_RISKS` entries were not accepted - unknown, expired, undated where a date is needed, with a date that is not a real YYYY-MM-DD date, empty, or named twice | anything but `none`: each is also logged at WARN on the same logger, naming the entry |
 | `violations` | each violation of the production profile the start-up sweep found, labelled `REFUSED:`, `not refused (development):`, `not refused (switched off):` when every component it names is switched off, `not refused (names no component):`, or `not refused (not switched on):` for a required setting of a component not switched on | anything `REFUSED`: that component answers 503 until the setting is fixed or its risk accepted |
-| `code refusals` | each component a package refused in code, for a condition that is not a setting (a store in memory without the `in-memory-state` risk) | anything at all in production |
+| `code refusals` | each component a package refused in code, for a condition that is not a setting (a store in memory without the `in-memory-state` risk, or on a clustered node; a topology that is unknown or lacks what a cluster needs) | anything at all in production |
 | `profile notes` | the sweep's warnings: an `OIDF_*` name under no catalogue's family, a refused `OIDF_ACCEPTED_RISKS` entry, a legacy spelling | a misspelt name |
 | `legacy values` | each setting read so far from a spelling only the reader before 0.6.0 took (development only), and what it was read as | the strict spelling to write instead |
-| `insecure TLS` | each setting that turned certificate or host-name checking off in this war, and since when | anything at all in production |
+| `insecure TLS` | each setting that turned certificate or host-name checking off in any copy of platform in the JVM, and since when, naming the copy: `webapp`, `engine`, or a plugin's relocation such as `rar` for the RAR plugin's "Skip TLS verification (dev only)" (from 0.7.0, F-0164; before, only this war's own uses). PingFederate configures a plugin instance on its first use, after the audit has run (the T4 rig, 2026-10-08), so the line ends "later plugin uses: server.log WARN only": a use made after start-up is in server.log as its WARN, naming the setting. The records last as long as the JVM: a war redeployed without a restart still lists a use its earlier deployment made, with that use's first instant, until PingFederate restarts | anything at all in production |
 | `JDK host names` | whether `jdk.internal.httpclient.disableHostnameVerification` switches host name checking off for every Java HTTP client in the JVM | `checked` in production; from 0.6.0 production refuses every component while the property is set, with any value, even `false`, which the JDK reads as checked |
-| `components` | each feature's state and, when it is not serving, why | the same states `/agentic-identity/health` reports ([health.md](health.md)) |
+| `components` | each feature's state and, when it is not serving, why | the same states `/agentic-identity/health` reports ([health.md](health.md)); from 0.7.0 a JDBC store's component is `FAILED_CONFIG` when its database is behind the release, naming the `oidf-db-migrate.jar` command ([database-migrations.md](database-migrations.md#the-start-up-check)) |
 | `executors` | the background jobs this war runs | |
 | `metrics MXBean` | the JMX name of this war's metrics | |
 | `platform` | where this war's copy of the shared library was loaded from | a path inside the war's own `WEB-INF/lib` |
@@ -73,13 +73,17 @@ it logs a WARN saying so and does nothing else - no mark, no banner, no shutdown
 ## At shutdown
 
 When a war stops, the listener closes what that war opened - background jobs, its metrics MXBean, its Redis
-connections - within five seconds, and logs `Lifecycle listener: <war> stopped; closed <n>: ...`. You see that line
-when a war is undeployed. You do not see it when PingFederate itself stops: PingFederate stops its logging before it
-destroys its webapps (F-0210). It still calls their listeners - a probe listener on the rig
-wrote a file from its `contextDestroyed` at `docker stop -t 30` - but that the close finishes before the JVM exits has
-not been seen (U-0220).
+connections - within five seconds, and logs `Lifecycle listener: <war> stopping; ...` before the closes and
+`Lifecycle listener: <war> stopped; closed <n>: ...` after, naming any close the budget outran. Until 0.7.0 you saw
+those lines only when a war was undeployed, never when PingFederate itself stopped
+([F-0210](../findings.md#f-0210)): by the time PingFederate destroys its webapps it has stopped the log4j context
+the listener's logger belonged to. From 0.7.0 they go through a logger asked for at that moment, with a fallback
+beside log4j ([logging.md](logging.md#the-line-a-war-writes-as-it-stops)); on the rig at `docker stop -t 30`
+(2026-10-06) both lines reached `server.log` and `docker logs`, the second reading `closed 3: executor
+ssf-push-delivery (CLOSED) SSF audit source (CLOSED) metrics MXBean ...` ([U-0220](../findings.md#u-0220) asked
+whether the closes finish before the JVM exits).
 
 Give PingFederate time to stop. On the rig (Docker Compose 5.1.3) the container was created with a one-second stop
 timeout, so a plain `docker stop` killed PingFederate after one second (exit 137), while `docker stop -t 30` let it
-stop cleanly in about five seconds (exit 0) (F-0211). Set a grace period of ten seconds or
+stop cleanly in about five seconds (exit 0) ([F-0211](../findings.md#f-0211)). Set a grace period of ten seconds or
 more wherever PingFederate runs.

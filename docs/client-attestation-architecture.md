@@ -301,21 +301,22 @@ the discovery document are all derived from this registry.
 
 ### 3.5 Error codes
 
-Issuance (`IssuanceException`) and verification (`ClientAttestationException`):
+Issuance (`POST /federation/attestation`, CAS §4.6) and verification (`ClientAttestationException`). The issuance
+endpoint answers with the draft's codes only (F-0392, 0.7.0); the validators' internal reasons `invalid_svid` and
+`spiffe_id_not_authorized` stay in the log and the metrics, and are answered as `invalid_instance_attestation` and
+`instance_not_authorized`:
 
 | Issuance code | HTTP | | Verification code |
 |---|---|---|---|
 | `invalid_request` | 400 | | `invalid_client` |
-| `invalid_client` | 400 | | `use_attestation_challenge` |
-| `invalid_svid` | 401 | | `use_fresh_attestation` |
-| `invalid_instance_attestation` | 401 | | `invalid_authorization_details` |
-| `invalid_instance_proof` | 401 | | `insufficient_disclosure` |
-| `spiffe_id_not_authorized` | 403 | | |
-| `instance_not_authorized` | 403 | | |
+| `invalid_client` | 401 | | `use_attestation_challenge` |
+| `invalid_instance_attestation` | 400 | | `use_fresh_attestation` |
+| `invalid_instance_proof` | 400 | | `invalid_authorization_details` |
+| `instance_not_authorized` | 403 | | `insufficient_disclosure` |
 | `access_denied` | 403 | | |
 | `instance_attestation_bound` | 401 | | |
 | `server_error` | 500 | | `temporarily_unavailable` |
-| `temporarily_unavailable` | 503 | | |
+| `temporarily_unavailable` | 503, or 429 with `Retry-After` past the per-address limit | | |
 
 At the filter, `use_attestation_challenge` returns 400, `temporarily_unavailable` 503 (the challenge or
 replay store could not answer; the code is RFC 6749 §4.1.2.1's, which RFC 6749 defines for the
@@ -475,7 +476,7 @@ Does the implementation match the text it published?
 | `CAS §4` | §4 issuance API — challenge endpoint, attestation endpoint, instance-key proof, processing rules, errors | Implemented |
 | `CAS §5` | §5 discovery metadata | Implemented — and `ClientAttestationServiceMetadataServlet` reads the same config the issuance servlet enforces, so the document cannot drift from behaviour |
 | `CAS §6` | §6 associating instance identity with a client id | **Partial** — resolution is by evidence rather than by a supplied `client_id` (good), and all three metadata sources exist. §6.2 rule 1 (federation → CIMD → registration order) and rule 2 (federation MUST chain-validate to the anchor, and revocation lands within one cache lifetime) are met since 2026-09-25 (`AttesterResolversTest`, `OpenIdFederationClientResolverTest`). Rule 3 (CIMD MUST NOT supply instance trust roots) is still **violated** under the development profile, and the CIMD source is refused under any other since 0.4.0 (M-1) - see the next row |
-| `CAS §6.2` | §6.2 rule 3 — CIMD trust roots | **Not implemented; mitigated outside development** (M-1, F-0067): unless `OIDF_DEPLOYMENT_PROFILE=development` the attester leaves the CIMD source out, with an ERROR naming `OIDF_ATTESTER_CIMD_URL` (`AttesterResolversTest`). Under development `CimdMapping.toConfig:29-30` still copies `bundle` and `bundle_url` straight out of the unsigned document. `OIDF_CIMD_TRUST_BUNDLES` exists but is read only to *advertise* `cimd` in the CAS metadata; nothing enforces it. Whoever controls the CIMD URL can publish a bundle they hold the keys to and mint attestations for arbitrary subjects |
+| `CAS §6.2` | §6.2 rule 3 — CIMD trust roots | **Not implemented; mitigated outside development** (M-1, F-0067): unless `OIDF_DEPLOYMENT_PROFILE=development` the start-up audit refuses `ATTESTATION_ISSUER` when `OIDF_ATTESTER_CIMD_URL` is set, naming it, and a resolver built anyway leaves the CIMD source out with an ERROR (`AttesterResolversTest`). Under development `CimdMapping.toConfig:29-30` still copies `bundle` and `bundle_url` straight out of the unsigned document. `OIDF_CIMD_TRUST_BUNDLES` exists but is read only to *advertise* `cimd` in the CAS metadata; nothing enforces it. Whoever controls the CIMD URL can publish a bundle they hold the keys to and mint attestations for arbitrary subjects |
 | `CAS §7` | §7 down-scoping at issuance | **Partial** — rules 1–3 (subset semantics, empty request = full ceiling, `narrowing_behavior: reject`) are met. Rule 4 (a PDP or context-dependent narrowing) is not; the selector-conditioned downscoping the code comments describe is comment-only (§3.3); and the registration-time `instances[i].entitlement ⊆ entitlement` check is inert for CIMD/federation-sourced clients because they never carry a client ceiling |
 | `CAS §9` | §9.1 evidence reuse - the Instance Attestation never embedded, bound to its first presenter | Implemented since 0.4.0 (S3b, F-0002): `workload` carries `instance_attestation_sha256`, `_type` and `_exp`; `EvidenceBindingStore` binds last, after every other check, keyed on the SHA-256 of the evidence's JWS Signing Input so a re-encoded token meets the same binding; a second key or client is `instance_attestation_bound` and an `attestation.evidence.conflict` audit event naming both keys (`AttestationIssuanceServletTest`). Detectable, not preventable: a thief who presents first wins |
 | `CAS §8` | §8 lifetime / rotation / revocation | Partial — lifetime and rotation yes; revocation depends on the CAEP loop, which is not closed (`unverified.md` items 7 and 12); and a federation client's revocation at the anchor does not revoke issuance because no chain is walked |
@@ -597,8 +598,9 @@ audit event naming both keys. What remains is stated in the attester's README: a
 presents first wins, detectably but not preventably, until evidence is itself key-bound.
 
 **CIMD hands the attester its own trust roots - MITIGATED 2026-09-27 (M-1, F-0067).** Outside
-`OIDF_DEPLOYMENT_PROFILE=development` the attester leaves the `cimd` source out with an ERROR naming
-`OIDF_ATTESTER_CIMD_URL`; the federation and PingFederate sources keep serving. The full fix is X-B02.
+`OIDF_DEPLOYMENT_PROFILE=development` the start-up audit refuses `ATTESTATION_ISSUER` when
+`OIDF_ATTESTER_CIMD_URL` is set, naming it; as defence in depth, a resolver built anyway leaves the `cimd`
+source out with an ERROR. The full fix is X-B02.
 The original finding: `CimdMapping.toConfig:29-30` accepts `bundle` and
 `bundle_url` from the Client ID Metadata Document — an unsigned JSON file at an HTTPS URL. The CAS spec
 this repo published says (§6.2 rule 3) a CAS MUST NOT do this, and explains why: whoever controls the
@@ -742,7 +744,7 @@ coupling is enforced in code, or accepted in writing.
 
 **~~`RarContainment` duplicates `RarEntitlement`.~~ Closed, 2026-09-27 (PRs #37 and #36).** The token gate and
 the issuer (S1b) and the RAR plugin (S1c) all ask `libs/rar-model`; the plugin shades and relocates it,
-`RarContainment` and its contract test are gone, `RarEntitlement` is unused until its deletion (F-0100), and
+`RarContainment` and its contract test are gone, `RarEntitlement` was deleted in 0.7.0 (F-0100), and
 the attestation context's `rar_models_fingerprint` shows the two classloaders hold one model.
 
 ### Nice to have

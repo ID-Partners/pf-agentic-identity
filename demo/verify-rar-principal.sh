@@ -122,9 +122,9 @@ pdp_lines() { wc -l < "$OUT/pdp-requests.jsonl" | tr -d ' '; }
 pdp_since() {  # pdp_since <line-count>  -> the stub's requests after that line, one per line
   tail -n +"$(( $1 + 1 ))" "$OUT/pdp-requests.jsonl"
 }
-# The plugin's INFO lines, read from server.log itself: `docker logs` tails that file and lags it by seconds.
+# The plugin's per-request lines (DEBUG, governance_at_debug), read from server.log itself: `docker logs` tails that file and lags it by seconds.
 pf_log_lines() { docker exec "$PF_RIG_NAME" grep -c 'RAR governance: type=' /opt/out/instance/log/server.log 2>/dev/null || true; }
-pf_log_since() {  # the plugin's INFO lines after the n-th
+pf_log_since() {  # the plugin's per-request lines after the n-th
   { docker exec "$PF_RIG_NAME" grep 'RAR governance: type=' /opt/out/instance/log/server.log 2>/dev/null || true; } \
     | tail -n +"$(( $1 + 1 ))" | sed 's/.*RAR governance: //'
 }
@@ -252,6 +252,19 @@ wait_for_pf() {
   echo "ERROR: PingFederate did not come back on $PF_PORT_HTTPS" >&2; exit 1
 }
 
+# From 0.7.0 (O6) the plugin writes its per-request "RAR governance:" line at DEBUG, and PingFederate's log4j2.xml is
+# the one control: give the processor's logger DEBUG there, and wait out the file's monitorInterval (30 s) for log4j to
+# read it again. Done after every start, since the image's bootstrap puts the stock file back.
+governance_at_debug() {
+  local conf=/opt/out/instance/server/default/conf/log4j2.xml
+  docker exec "$PF_RIG_NAME" grep -q 'oidf.rar.AttestationAwareRarProcessor' "$conf" && return 0
+  docker exec "$PF_RIG_NAME" sed -i 's#</Loggers>#    <Logger name="com.pingidentity.ps.oidf.rar.AttestationAwareRarProcessor" level="DEBUG"/>\n    </Loggers>#' "$conf"
+  docker exec "$PF_RIG_NAME" grep -q 'oidf.rar.AttestationAwareRarProcessor' "$conf" \
+    || { echo "ERROR: could not give the RAR processor's logger DEBUG in $conf" >&2; exit 1; }
+  sleep 35
+}
+governance_at_debug
+
 # ── the stub PDP on the host ─────────────────────────────────────────────────────────────────────
 python3 "$HERE/rar-principal/stub-pdp.py" "$STUB_PORT" "$OUT/pdp-requests.jsonl" > "$OUT/stub-pdp.log" 2>&1 &
 STUB_PID=$!
@@ -300,6 +313,7 @@ if [[ -n "${OLD_PLUGIN_JAR:-}" ]]; then
   echo "   exported the archive; the field is stored as: $(unzip -p "$OUT/archive-old.zip" 'authorization-detail-processors/*' | grep -o '<urn:Field name="Shared Secret">[^<]*' | sed 's/.*>//' | sed "s/$SECRET/<the plaintext secret>/")"
   ( cd "$HERE" && docker compose up -d ) > "$OUT/compose-restart.log" 2>&1   # RAR_PLUGIN_JAR now names the jar under test
   wait_for_pf
+  governance_at_debug
   curl -sk -o /dev/null -w '   imported the archive under the new jar: HTTP %{http_code}\n' -X POST -u "administrator:$PW" -H 'X-XSRF-Header: PingFederate' \
     -F "file=@$OUT/archive-old.zip" "$ADMIN/configArchive/import?forceImport=true"
   sleep 5
