@@ -16,7 +16,7 @@
         with the file only in the archive the listener always comes up with the stock list - found by
         probing the built image, which still took two CBC suites with a correct archive inside it.
 
-    in the archive (author.sh stages it before export.sh runs; export.sh refuses an archive without it)
+    in the archive (tools/profile.py author stages it before it exports, and refuses an archive without it)
         A config archive carries config-store/, so an import would otherwise put the stock list back
         on disk, and the next restart of a PingFederate that does keep its disk would pick it up.
 -->

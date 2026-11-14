@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 # Where the rig's scripts find the image build, the PingFederate version and the modules, in either tree they
-# run in. Sourced by up.sh, author.sh, apply.sh, compose-context.sh and verify-rar-principal.sh; sets no shell
+# run in. Sourced by up.sh, compose-context.sh, verify-key-rotation.sh and verify-rar-principal.sh; sets no shell
 # options, and returns non-zero (after saying why) when neither layout is there.
 #
 #   PFAI_ROOT         the directory above this one

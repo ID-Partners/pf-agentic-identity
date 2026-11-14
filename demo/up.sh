@@ -3,14 +3,15 @@
 #
 # Nothing here is a deploy. It is the one-machine version of what a conformance run or a demo needs:
 #
-#   1. gen-keys.sh          the suite's key pairs and certificates, three secrets    (git-ignored)
-#   2. author.sh            a stock PF 13.1.3 with an admin API, on localhost:29999
-#   3. apply.sh apply       terraform/ -> that server: OAuth server, tokens, clients, login form
-#   4. export.sh            its realised config as data.zip - PF's own saved state    (git-ignored)
-#   5. mvn package + stage  the module jars from this repo (run FIRST: author.sh needs the CIBA plugin), or
+#   1. mvn package + stage  the module jars from this repo (first: authoring needs the CIBA plugin), or
 #      stage-from-release   with PF_RELEASE, or in a tree with no pom.xml, from a release's verified assets
-#   6. compose-context.sh   the image build context: this repo's Dockerfile + that archive
-#   7. docker compose up    the image, built and running, with vars.env and your licence details
+#   2. gen-keys.sh          the suite's key pairs and certificates, the secrets      (git-ignored)
+#   3. tools/profile.py author profiles/conformance-<plan>.yaml
+#                           a stock PF 13.1.3 on localhost:29999, deploy/terraform/agentic-idp applied to it with
+#                           the profile's inputs, its realised config exported as data.zip    (git-ignored)
+#   4. tools/profile.py render  the same profile's environment, into .context/vars.env
+#   5. compose-context.sh   the image build context: this repo's Dockerfile + that archive
+#   6. docker compose up    the image, built and running, with that environment and your licence details
 #
 # You supply ONE thing: licence details. The image bakes no licence; the base image fetches an
 # evaluation licence at boot with PING_IDENTITY_DEVOPS_USER and PING_IDENTITY_DEVOPS_KEY, read from
@@ -21,9 +22,9 @@
 #                   host ports for PF's 9031 / 9080 / 9999 (defaults the same), when another PF has them.
 #   PF_BASE_URL     the origin PF advertises as its issuer. Default https://localhost:$PF_PORT_HTTPS,
 #                   which is what a suite on this machine reaches. For a PF on a public address, set it
-#                   to that origin - it is baked into the archive at step 3.
-#   SKIP_AUTHOR=1   reuse an existing data.zip (steps 1-4 skipped); rebuild the image only.
-#   SKIP_BUILD=1    reuse the staged module jars (step 5 skipped), in either mode.
+#                   to that origin - it is baked into the archive at step 3 (the profile's --base-url).
+#   SKIP_AUTHOR=1   reuse an existing data.zip (steps 2-3 skipped); rebuild the image only.
+#   SKIP_BUILD=1    reuse the staged module jars (step 1 skipped), in either mode.
 #   PF_RELEASE      <version> (0.6.1 or later) or <dir>: stage the modules from that release's assets instead of
 #                   building them - stage-from-release.sh fetches a version anonymously into its cache, or takes
 #                   a directory of assets, and stages nothing that does not verify against SHA256SUMS. No Maven
@@ -35,11 +36,21 @@
 #   PF_RIG_SLOT     0 to 44: take the slot's ports (layout.sh's pfai_slot_ports: 57100 + 20 x slot, offsets 0-4)
 #                   for PF_PORT_* and PF_AUTHOR_*_PORT, and name the rig pf-rig-s<slot> unless PF_RIG_NAME says
 #                   otherwise. A port set explicitly still wins. Unset keeps the ports above.
-#   PF_PROFILE      federation: PF is its own Trust Anchor (vars.federation.env), for the suite's
-#                   deployed-entity plan. federation-op: that, and PF joined to the suite's own federation
-#                   (vars.federation-op.env) with PAR optional and the suite's CA trusted, for the OP plan -
-#                   run the suite with suite/suite-compose.yml. Unset: federation stays inert, as the FAPI,
-#                   SSF and CIBA plans want it.
+#   PF_PROFILE      which profiles/conformance-<name>.yaml the rig is: its PingFederate configuration and its
+#                   environment both come from that one file (tools/profile.py). Unset: conformance-fapi2, the
+#                   FAPI 2.0, FAPI-CIBA and SSF plans' rig, federation inert. federation: PF is its own Trust
+#                   Anchor, for the suite's deployed-entity plan. federation-op: that, and PF joined to the suite's
+#                   own federation with PAR optional and the suite's CA trusted, for the OP plan - run the suite
+#                   with suite/suite-compose.yml. attester-cimd: the attester's CIMD source, one client whose
+#                   document cimd/serve.sh serves; REL5 runs it end to end. ciba-ping: the CIBA clients in ping mode.
+#                   fapi2-attestation: two more FAPI 2.0 clients, authenticated by attest_jwt_client_auth with the
+#                   suite as attester (docker-compose.fapi2-attestation.yml is laid over), for the FAPI 2.0 plan's
+#                   client_attestation variant - which needs a patched suite (suite/suite-compose.yml, SUITE_IMAGE).
+#   PF_HARNESS      1 with PF_PROFILE=federation or federation-op: lay profiles/conformance-federation-harness.yaml's
+#                   own settings over the profile (the operator client and API), for services/harness
+#                   FederationSmokeHarness live. Unset, the federation profiles are exactly what the conformance
+#                   plans were pinned on.
+#   PF_EXTRA_VARS   one more KEY=VALUE file laid over the environment (an authority database for the harness, say)
 #   SUITE_PORT      federation-op: the port suite/suite-compose.yml publishes the suite on (default 9643).
 #   SUITE_BASE_URL  federation-op: the suite's origin as its compose file gives it (default
 #                   https://host.docker.internal:$SUITE_PORT). SUITE_ALIAS: the plan's alias.
@@ -72,11 +83,31 @@ export PF_ADMIN_HOST="https://localhost:$PF_AUTHOR_ADMIN_PORT"
 export PF_PORT_HTTPS="${PF_PORT_HTTPS:-9031}" PF_PORT_HTTP="${PF_PORT_HTTP:-9080}" PF_PORT_ADMIN="${PF_PORT_ADMIN:-9999}"
 export PF_BASE_URL="${PF_BASE_URL:-https://localhost:$PF_PORT_HTTPS}"
 LOCAL="https://localhost:$PF_PORT_HTTPS"
-export TF_VAR_pf_base_url="$PF_BASE_URL"
 case "${PF_PROFILE:-}" in
-  "" | federation | federation-op) ;;
-  *) echo "ERROR: PF_PROFILE=$PF_PROFILE is not a profile this rig has (federation, federation-op)" >&2; exit 1 ;;
+  "") PROFILE=conformance-fapi2 ;;
+  federation | federation-op | attester-cimd | ciba-ping | fapi2-attestation) PROFILE="conformance-$PF_PROFILE" ;;
+  *) echo "ERROR: PF_PROFILE=$PF_PROFILE is not a profile this rig has (federation, federation-op, attester-cimd, ciba-ping, fapi2-attestation)" >&2; exit 1 ;;
 esac
+# fapi2-attestation's PingFederate reads two files gen-keys.sh writes, mounted by its overlay.
+if [[ "$PROFILE" == conformance-fapi2-attestation ]]; then
+  export COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.yml}:docker-compose.fapi2-attestation.yml"
+fi
+# The profile, laid over by the harness's own settings when asked for, with the issuer this rig advertises.
+PROFILE_ARGS=("$PROFILE" --base-url "$PF_BASE_URL")
+if [[ "${PF_HARNESS:-0}" == 1 && "${PF_PROFILE:-}" == federation* ]]; then
+  PROFILE_ARGS+=(--with conformance-federation-harness)
+fi
+# Two knobs callers set as TF_VAR_ before the rig authored through profiles, honoured as profile values: the suite
+# origins PF accepts as redirect targets (tools/ci/licensed-conformance.sh's :8443 suite), and the attester's
+# transit-key client (docker-compose.attester-keys.yml), whose secret joins secrets.env's below.
+if [[ -n "${TF_VAR_suite_base_urls:-}" ]]; then
+  PROFILE_ARGS+=(--set "conformance.suite_base_urls=$TF_VAR_suite_base_urls")
+fi
+if [[ -n "${TF_VAR_attester_signing_key_ref:-}" ]]; then
+  PROFILE_ARGS+=(--set "conformance.attester=$(python3 -c 'import json, os; print(json.dumps({"signing_key_ref": os.environ["TF_VAR_attester_signing_key_ref"], "spiffe_bundle": os.environ.get("TF_VAR_attester_spiffe_bundle", "")}))')")
+fi
+PROFILE_TOOL="$PFAI_ROOT/tools/profile.py"
+PROFILE_OUT="$HERE/.profile"
 SUITE_PORT="${SUITE_PORT:-9643}"
 SUITE_BASE_URL="${SUITE_BASE_URL:-https://host.docker.internal:$SUITE_PORT}"
 SUITE_ALIAS="${SUITE_ALIAS:-pf-agentic-identity-federation-op}"
@@ -87,11 +118,14 @@ PING_CONFIG="${PING_DEVOPS_CONFIG:-$HOME/.pingidentity/config}"
   echo "       Create a KEY=VALUE file with PING_IDENTITY_DEVOPS_USER and PING_IDENTITY_DEVOPS_KEY (your" >&2
   echo "       Ping DevOps credentials), or point PING_DEVOPS_CONFIG at one. See README.md." >&2
   exit 1; }
-TOOLS=(docker terraform node curl unzip)
+TOOLS=(docker terraform node curl unzip python3)
 [[ "$PFAI_MODE" == release ]] || TOOLS+=(mvn)
 for tool in "${TOOLS[@]}"; do
   command -v "$tool" >/dev/null || { echo "ERROR: $tool is required" >&2; exit 1; }
 done
+python3 -c 'import yaml' 2>/dev/null || {
+  echo "ERROR: tools/profile.py reads the profiles with PyYAML: python3 -m pip install --require-hashes -r $PFAI_ROOT/tools/profile/requirements.txt" >&2
+  exit 1; }
 if [[ "$PFAI_MODE" == release ]]; then
   command -v sha256sum >/dev/null || command -v shasum >/dev/null || { echo "ERROR: sha256sum or shasum is required" >&2; exit 1; }
 fi
@@ -103,8 +137,8 @@ if [[ ! -f "$PF_AUTHOR_ENV" ]]; then
   echo "generated $PF_AUTHOR_ENV (the authoring PF's admin password; git-ignored)"
 fi
 
-# Stage first: author.sh stages the CIBA simulator from modules/ into the authoring server, because
-# terraform/ciba.tf can only instantiate a plugin PingFederate can see.
+# Stage first: authoring stages the CIBA simulator from modules/ into the authoring server, because
+# deploy/terraform/modules/ciba can only instantiate a plugin PingFederate can see.
 if [[ "${SKIP_BUILD:-0}" != 1 || ! -f "$PFAI_IMAGE_DIR/modules/MANIFEST" ]]; then
   if [[ "$PFAI_MODE" == release ]]; then
     "$PFAI_IMAGE_DIR/stage-from-release.sh" --profile conformance ${PF_RELEASE:+"$PF_RELEASE"}
@@ -115,37 +149,42 @@ fi
 
 if [[ "${SKIP_AUTHOR:-0}" != 1 ]]; then
   "$HERE/gen-keys.sh"
-  if [[ "${PF_PROFILE:-}" == federation-op ]]; then
-    # The OP plan's RP sends its request object by value at the authorization endpoint, which PAR REQUIRED
-    # refuses; and PF fetches the suite RP's jwks_uri itself, over TLS it checks against its trusted CAs.
-    export TF_VAR_par_status=ENABLED
-    TF_VAR_trusted_ca_file_data="$(openssl x509 -in "$HERE/keys/suite-tls-ca.crt" -outform DER | base64 | tr -d '\n')"
-    export TF_VAR_trusted_ca_file_data
-  fi
-  "$HERE/author.sh"
-  # One resource at a time: in parallel, PingFederate has twice read back its server settings as the defaults straight
-  # after they were written, and the provider fails the apply ("inconsistent result after apply").
-  "$HERE/apply.sh" apply -auto-approve -parallelism=1
-  "$HERE/export.sh"
+  # shellcheck disable=SC1090,SC1091
+  . "$PFAI_VERSION_ENV"
+  # A fresh authoring server and state, the profile's configuration applied one resource at a time (in parallel
+  # PingFederate has read back its server settings as the defaults), the archive exported and checked for what the
+  # profile's features need: the CBC suites and CIBA window config-store/ sets, the SSF client's audience, the
+  # simulator. The keys, certificates and secrets are gen-keys.sh's; the admin password is $PF_AUTHOR_ENV's.
+  # The authoring container's name is this rig's: one the old author.sh left carries no tools/profile.py label, which
+  # author refuses to replace, so it goes here.
   docker rm -f "$PF_AUTHOR_NAME" >/dev/null 2>&1 || true
+  mkdir -p "$PROFILE_OUT"; chmod 700 "$PROFILE_OUT"
+  ( umask 177; cat "$HERE/secrets.env" > "$PROFILE_OUT/secrets.env"
+    if [[ -n "${TF_VAR_attester_client_secret:-}" ]]; then
+      printf 'attester_client_secret=%s\n' "$TF_VAR_attester_client_secret" >> "$PROFILE_OUT/secrets.env"
+    fi )
+  python3 "$PROFILE_TOOL" author "${PROFILE_ARGS[@]}" --out "$PROFILE_OUT" \
+    --material-dir "$HERE/keys" --secrets "$PROFILE_OUT/secrets.env" --set "material.config_store=$HERE/config-store" \
+    --author-env "$PF_AUTHOR_ENV" --name "$PF_AUTHOR_NAME" --image "${PF_IMAGE:?}@${PF_IMAGE_DIGEST:?}" \
+    --admin-port "$PF_AUTHOR_ADMIN_PORT" --runtime-port "$PF_AUTHOR_RUNTIME_PORT" --modules-dir "$PFAI_IMAGE_DIR/modules"
+  # A configArchive is a plain zip with pf.jwk inside: the image imports it, and boots with its master key and
+  # system keys lifted out (git-ignored, all three).
+  rm -f "$PROFILE_OUT/secrets.env"
+  mv "$PROFILE_OUT/data.zip" "$HERE/data.zip"
+  mkdir -p "$HERE/overlay"; chmod 700 "$HERE/overlay"
+  ( umask 177; unzip -o -q -j "$HERE/data.zip" pf.jwk pingfederate-system-keys.xml -d "$HERE/overlay" )
 else
   [[ -f "$HERE/data.zip" ]] || { echo "ERROR: SKIP_AUTHOR=1 but no data.zip - run without it first" >&2; exit 1; }
 fi
 
 CTX="$("$HERE/compose-context.sh")"
 
-# The running PF's environment: vars.env with the issuer substituted on the lines that carry it (the
-# introspection endpoint is the container's own loopback and stays), plus the one generated secret the
-# servlet needs (its other half is in the archive). Rendered into the git-ignored context.
-# A profile adds variables after vars.env's; it sets names vars.env leaves unset. {{SUITE_BASE_URL}},
-# {{SUITE_ALIAS}} and {{PUBLIC_JWKS:name}} (keys/name.public.jwks.json, on one line) are filled in.
-PROFILE_VARS=()
-case "${PF_PROFILE:-}" in
-  federation) PROFILE_VARS=("$HERE/vars.federation.env") ;;
-  federation-op) PROFILE_VARS=("$HERE/vars.federation.env" "$HERE/vars.federation-op.env") ;;
-esac
-cat "$HERE/vars.env" ${PROFILE_VARS[@]+"${PROFILE_VARS[@]}"} \
-  | sed -E "/^(OIDF_SSF_ISSUER|OIDF_FEDERATION_[A-Z_]+)=/ s#https://localhost:9031#$PF_BASE_URL#" \
+# The running PF's environment: the profile's, rendered (the issuer already in it), with what the profile leaves to
+# whoever runs the image filled in - {{SUITE_BASE_URL}}, {{SUITE_ALIAS}} and {{PUBLIC_JWKS:name}} (keys/name.public.jwks.json,
+# on one line) - then PF_EXTRA_VARS' lines, and the one generated secret the servlet needs (its other half is in the
+# archive). Rendered into the git-ignored context; docker compose keeps the last value of a name.
+python3 "$PROFILE_TOOL" render "${PROFILE_ARGS[@]}" --out "$PROFILE_OUT" >/dev/null
+cat "$PROFILE_OUT/vars.env" ${PF_EXTRA_VARS:+"$PF_EXTRA_VARS"} \
   | KEYS="$HERE/keys" SUITE_BASE_URL="$SUITE_BASE_URL" SUITE_ALIAS="$SUITE_ALIAS" python3 -c '
 import json, os, re, sys
 text = sys.stdin.read().replace("{{SUITE_BASE_URL}}", os.environ["SUITE_BASE_URL"]).replace("{{SUITE_ALIAS}}", os.environ["SUITE_ALIAS"])
@@ -163,7 +202,7 @@ for _ in $(seq 1 60); do
     echo "PingFederate is up (issuer $PF_BASE_URL):"
     echo "  OAuth/OIDC discovery  $LOCAL/.well-known/openid-configuration"
     echo "  SSF transmitter       $LOCAL/.well-known/ssf-configuration"
-    echo "  OpenID Federation     $LOCAL/.well-known/openid-federation${PF_PROFILE:+  (profile $PF_PROFILE)}"
+    echo "  OpenID Federation     $LOCAL/.well-known/openid-federation  (profile $PROFILE)"
     echo "  plain HTTP listener   http://localhost:$PF_PORT_HTTP/"
     echo "  admin console         https://localhost:$PF_PORT_ADMIN/pingfederate  (administrator / the password in $PF_AUTHOR_ENV)"
     echo

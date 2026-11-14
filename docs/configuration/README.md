@@ -25,32 +25,33 @@ written by hand is this page, outside its generated list.
 | [platform-log](platform-log.md) | `libs/platform` | `com.pingidentity.ps.oidf.platform.log` | 2 |
 | [platform-redis](platform-redis.md) | `libs/platform` | `com.pingidentity.ps.oidf.platform.redis` | 9 |
 | [trusted-proxies](trusted-proxies.md) | `libs/platform` | `com.pingidentity.ps.oidf.platform.net` | 3 |
+| [spire-entry-reader](spire-entry-reader.md) | `services/spire-entry-reader` | `com.pingidentity.ps.oidf.spire.reader` | 12 |
 | [rar-models](rar-models.md) | `libs/rar-model` | `com.pingidentity.ps.oidf.rar.model` | 2 |
 | [outbound-fetch](outbound-fetch.md) | `libs/oidf-jose` | `com.pingidentity.ps.oidf.jose` | 4 |
 | [attestation-challenge](attestation-challenge.md) | `libs/client-attestation` | `com.pingidentity.ps.oidf.clientattestation.servlet` | 6 |
-| [federation-entity](federation-entity.md) | `libs/openid-federation` | `com.pingidentity.ps.oidf.federation` | 29 |
+| [federation-entity](federation-entity.md) | `libs/openid-federation` | `com.pingidentity.ps.oidf.federation` | 28 |
 | [federation-resolution](federation-resolution.md) | `libs/openid-federation` | `com.pingidentity.ps.oidf.federation` | 7 |
 | [hosted-entity-signing](hosted-entity-signing.md) | `libs/openid-federation` | `com.pingidentity.ps.oidf.authority` | 2 |
 | [metrics](metrics.md) | `libs/platform-pf` | `com.pingidentity.ps.oidf.platform.pf.metrics` | 2 |
 | [operator-auth](operator-auth.md) | `libs/platform-pf` | `com.pingidentity.ps.oidf.platform.pf.auth` | 13 |
 | [pf-audit](pf-audit.md) | `libs/platform-pf` | `com.pingidentity.ps.oidf.platform.pf.audit` | 2 |
 | [platform-lease](platform-lease.md) | `libs/platform-pf` | `com.pingidentity.ps.oidf.platform.pf.lease` | 6 |
-| [attestation-token-endpoint](attestation-token-endpoint.md) | `servlets/pf-integration` | `com.pingidentity.ps.oidf.servlet.clientregistration` | 4 |
-| [client-properties](client-properties.md) | `servlets/pf-integration` | `com.pingidentity.ps.oidf.servlet.clientregistration` | 22 |
+| [attestation-token-endpoint](attestation-token-endpoint.md) | `servlets/pf-integration` | `com.pingidentity.ps.oidf.servlet.clientregistration` | 27 |
+| [client-properties](client-properties.md) | `servlets/pf-integration` | `com.pingidentity.ps.oidf.servlet.clientregistration` | 31 |
 | [fapi2-profile](fapi2-profile.md) | `servlets/pf-integration` | `com.pingidentity.ps.oidf.servlet.fapi2` | 2 |
-| [federation-runtime](federation-runtime.md) | `servlets/pf-integration` | `com.pingidentity.ps.oidf.pf` | 53 |
+| [federation-runtime](federation-runtime.md) | `servlets/pf-integration` | `com.pingidentity.ps.oidf.pf` | 55 |
 | [hosted-entities](hosted-entities.md) | `servlets/pf-integration` | `com.pingidentity.ps.oidf.servlet.trustanchor` | 8 |
 | [registration](registration.md) | `servlets/pf-integration` | `com.pingidentity.ps.oidf.servlet.clientregistration` | 8 |
-| [attestation-issuer](attestation-issuer.md) | `servlets/attestation-issuer` | `com.pingidentity.ps.oidf.servlet.attestation` | 20 |
+| [attestation-issuer](attestation-issuer.md) | `servlets/attestation-issuer` | `com.pingidentity.ps.oidf.servlet.attestation` | 50 |
 | [evidence-policy](evidence-policy.md) | `servlets/attestation-issuer` | `com.pingidentity.ps.oidf.issuer` | 13 |
-| [issuance-client-properties](issuance-client-properties.md) | `servlets/attestation-issuer` | `com.pingidentity.ps.oidf.servlet.attestation` | 12 |
+| [issuance-client-properties](issuance-client-properties.md) | `servlets/attestation-issuer` | `com.pingidentity.ps.oidf.servlet.attestation` | 14 |
 | [ssf-cors](ssf-cors.md) | `servlets/ssf` | `com.pingidentity.ps.oidf.servlet.ssf` | 1 |
 | [ssf-logout-signal](ssf-logout-signal.md) | `servlets/ssf` | `com.pingidentity.ps.oidf.servlet.ssf` | 2 |
-| [ssf-transmitter](ssf-transmitter.md) | `servlets/ssf` | `com.pingidentity.ps.oidf.ssf` | 81 |
+| [ssf-transmitter](ssf-transmitter.md) | `servlets/ssf` | `com.pingidentity.ps.oidf.ssf` | 88 |
 | [rar-pdp-processor](rar-pdp-processor.md) | `plugins/rar-paz-plugin` | `com.pingidentity.ps.oidf.rar` | 25 |
 | [instance-registry](instance-registry.md) | `plugins/instance-registry-datasource` | `com.pingidentity.ps.oidf.registry` | 4 |
 | [ciba-simulator](ciba-simulator.md) | `plugins/ciba-sim` | `com.pingidentity.ps.oidf.cibasim` | 2 |
-| [device-enrolment](device-enrolment.md) | `services/device-enrolment` | `com.pingidentity.ps.oidf.enrolment` | 35 |
+| [device-enrolment](device-enrolment.md) | `services/device-enrolment` | `com.pingidentity.ps.oidf.enrolment` | 37 |
 | [gm-api](gm-api.md) | `services/gm-api/servlet` | `au.com.idpartners.gm.servlet` | 6 |
 | [db-migrate](db-migrate.md) | `tools/db-migrate` | `com.pingidentity.ps.oidf.dbmigrate` | 4 |
 
@@ -107,7 +108,8 @@ resolves one.
 per-client setting written onto a client that PingFederate does not declare is never applied.
 [docs/extended-properties.json](../extended-properties.json), generated from every extended-property row here, is
 the list a deployment declares, typically as a `pingfederate_extended_properties` resource in its own Terraform
-([conformance/terraform/extended-properties.tf](../../demo/terraform/extended-properties.tf) reads it).
+(tools/profile.py reads it for a profile with `pf.extended_properties: true`, and passes it to the `base` module under
+[deploy/terraform/modules](../../deploy/terraform/modules)).
 
 ## When a setting takes effect
 

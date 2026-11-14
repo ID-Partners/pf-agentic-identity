@@ -49,7 +49,7 @@ those statements expire - at most their lifetime, often an hour.
 With `OIDF_AUTHORITY_ENTITY_ID` set and operator authentication configured, PingFederate is a domain authority: it
 publishes and signs Entity Configurations for agents that can't publish their own, with a key per agent kept
 in OpenBao. Keep the agents in a database (`OIDF_AUTHORITY_JDBC_URL` or `OIDF_AUTHORITY_DATA_STORE_ID`, with the
-`V100`-`V101` migrations applied) - in memory they are gone at the next restart.
+`V100`-`V107` migrations applied) - in memory they are gone at the next restart.
 
 Every admin call below is an operator route: from 0.6.0 it needs a PingFederate-issued access token with the route's
 scope, DPoP-bound in production ([operator-authentication.md](../operator/operator-authentication.md#the-routes)).
@@ -81,7 +81,7 @@ for `rotate-key`) and a JSON body naming the agent:
 | `/federation/admin/entities/revoke` | `{"entity_id", "reason"?}` | Stops resolving, for good (a revoked agent is a 409 after) |
 | `/federation/admin/entities/metadata` | `{"entity_id", "metadata"}` | Replaces its metadata |
 | `/federation/admin/entities/metadata-policy` | `{"entity_id", "metadata_policy"}` | Replaces its own policy, which must only narrow the domain default |
-| `/federation/admin/entities/rotate-key` | `{"entity_id", "hosting_key_ref"}` | Moves it to a new OpenBao key, after checking the key signs |
+| `/federation/admin/entities/rotate-key` | `{"entity_id", "hosting_key_ref"}`, or `{"entity_id", "federation_jwks"}` for a self-signed agent | Moves it to a new OpenBao key, after checking the key signs; a self-signed agent to new public keys ([below](#self-signed-agents)) |
 
 `GET /federation/admin/entities` lists every hosted agent whatever its status; `?entity_id=` gives one, with its
 metadata and policy; `/federation/admin/entities/audit?entity_id=` gives its history. Every change records who
@@ -89,8 +89,39 @@ made it: the operator token's `sub` - for a client-credentials token, the operat
 `X-Federation-Actor` header names nobody: it is recorded only as the operator event's `claimed_label`. The token
 itself is never logged.
 
-Suspending or revoking stops the agent resolving here straight away. What it doesn't stop is in
+Suspending or revoking stops the agent resolving here straight away: the node that made the change drops every resolve
+response it kept about the agent, and a resolution running at that moment is not kept. Another node in a cluster can
+still answer from what it kept, for up to `OIDF_FEDERATION_RESOLUTION_RESOLVE_CACHE_SECONDS` (60 by default; set it to
+0 when that minute matters more than the cache). What it doesn't stop is in
 [how it works](how-it-works.md#what-stops-when).
+
+### Self-signed agents
+
+An agent that holds its own Federation Entity Key - in a Secure Enclave or on a YubiKey, say - is enrolled with
+`"hostingMode": "SELF_SIGNED"` and its public keys as `federationJwks` instead of a `hostingKeyRef`. PingFederate
+never signs for it: the agent signs its own Entity Configuration and publishes it with
+`PUT /federation/agents/<id>/entity-configuration` (no token - the signature by a registered key is the
+authorisation), PingFederate serves it at the agent's `/.well-known/openid-federation`, and its Subordinate Statement
+vouches for the agent's keys. From 0.8.0 this works with the authority's database too (`V107` adds the agent's keys
+and its published configuration to `hosted_entity`); before, a self-signed enrolment on a database answered 500.
+
+**Re-keying one.** When the agent's key is lost or replaced, an operator moves it to new public keys:
+
+```sh
+curl -sS https://pf.example.com/federation/admin/entities/rotate-key \
+  -H "Authorization: DPoP $TOKEN" -H "DPoP: $PROOF" -H 'Content-Type: application/json' \
+  -d '{"entity_id": "https://pf.example.com/federation/agents/mac-connector",
+       "federation_jwks": {"keys": [{"kty": "EC", "crv": "P-256", "kid": "k2", "x": "...", "y": "..."}]}}'
+```
+
+Public keys only: an empty set, or a key with a private member, is 400. A `hosting_key_ref` is refused for a
+self-signed agent, and `federation_jwks` for an authority-signed one. The answer's `publish_again` says what happens
+next. A chain only validates when the configuration is signed by a key in its own `jwks` and the Subordinate Statement
+carries those keys (§10.2: "For ES[0], verify that its signature validates with a public key in ES[0]["jwks"]"), so
+the configuration the agent published is kept only when the new keys still sign it and it publishes no other key.
+Otherwise it is cleared, `publish_again` is `true`, and the agent stops resolving until it publishes again under its
+new key (on another cluster node, after that node's kept resolve responses age out, as above). A re-key that raced another operator's change is 409 `stale_update`, and changed nothing. The agent cannot
+roll its own keys, and the authority does not publish its old ones ([limits](limits.md)).
 
 ## Trust Marks
 
@@ -332,7 +363,8 @@ key in its grace, has status `active`; one signed with a revoked key, `invalid`.
 2. Authenticate to it: `OIDF_PDP_AUTH=bearer` or `header` with `OIDF_PDP_AUTH_TOKEN` (the header is
    `CLIENT-TOKEN` unless `OIDF_PDP_AUTH_HEADER` says otherwise, as the RAR plugin sends it).
 3. Choose where it is asked: `OIDF_PDP_DECISION_POINTS` - `explicit_registration` and
-   `automatic_registration` by default; add `hosted_entity_enrol` and `token_issuance` if you want them.
+   `automatic_registration` by default; add `hosted_entity_enrol` and `token_issuance` if you want them, and any of
+   the steps in [Policy at each step](#policy-at-each-step).
 4. Give it a policy for the actions it will be asked about before you switch it on: every registration waits for
    it, and no decision is a 503.
 
@@ -366,6 +398,92 @@ PDP by hand, POST the request above to it:
 curl -sS "$OIDF_PDP_URL/access/v1/evaluation" -H 'Content-Type: application/json' \
   -H "CLIENT-TOKEN: $OIDF_PDP_AUTH_TOKEN" -H 'X-Request-ID: manual-1' -d @request.json
 ```
+
+## Policy at each step
+
+From 0.8.0 the policy engine can be asked at more steps than registration, enrolment and token issuance. Each is off
+until `OIDF_PDP_DECISION_POINTS` lists it, and needs `OIDF_PDP_MODE=authzen`: the deployment's own scope policy
+narrows registrations only.
+
+| Name to list | Action it is asked | When | What a denial does | What no decision does |
+|---|---|---|---|---|
+| `hosted_entity_suspend` | `federation.hosted_entity.suspend` | `POST /federation/admin/entities/suspend` | Nothing: recorded only | Nothing: recorded only |
+| `hosted_entity_revoke` | `federation.hosted_entity.revoke` | `POST /federation/admin/entities/revoke`, `DELETE /federation/agents/{id}` | Nothing: recorded only | Nothing: recorded only |
+| `hosted_entity_reactivate` | `federation.hosted_entity.reactivate` | `POST /federation/admin/entities/reactivate` | 403 `access_denied` | 503, or allowed with `OIDF_PDP_FAIL_OPEN=true` |
+| `hosted_entity_rekey` | `federation.hosted_entity.rekey` | `POST /federation/admin/entities/rotate-key` | 403 `access_denied` | 503, or allowed with `OIDF_PDP_FAIL_OPEN=true` |
+| `trust_mark_grant` | `federation.trust_mark.grant` | `POST /federation/admin/trust-marks` | 403 `access_denied` | 503, or allowed with `OIDF_PDP_FAIL_OPEN=true` |
+| `trust_mark_issue` | `federation.trust_mark.issue` | every mint at `/federation/trust_mark` (§8.6) | 404 `not_found`, as for no grant | 503, or allowed with `OIDF_PDP_FAIL_OPEN=true` |
+| `resolve` | `federation.resolve` | `/federation/resolve` (§8.3), after the subject resolved | 404 `invalid_subject` (§8.9) | 503, or allowed with `OIDF_PDP_FAIL_OPEN=true` |
+
+A suspension or a revocation is never stopped: an engine that is down, or says no, must not leave a compromised agent
+live. Its answer is in `federation.pdp.consulted` with `advisory=true`. Prefer `trust_mark_grant` to
+`trust_mark_issue`: the Trust Mark endpoint is public, and listing `trust_mark_issue` puts the engine in its path. The
+marks an entity's own configuration carries are not asked about. Every answer is counted in
+`oidf_federation_pdp_decisions_total{point,decision}`.
+
+What the engine hears: for a hosted entity, the entity as the subject (its Entity Types, status and whether it is
+listed), this authority as the resource, and the operator's `actor` and `reason` (and `hosting_key_ref` for a re-key);
+for a grant, the entity the mark is for as the subject, `{"type": "trust_mark_type", "id": <type>}` as the resource,
+and the operator and `not_after`; for a mint, the same subject and resource and this issuer in the context; for a
+resolution, the caller as the subject - the client that authenticated (§8.8), or `anonymous` with its `rate_key`, the
+address the resolve cap counts it by - and the resolved entity as the resource, with its Entity Types and the types of
+its Trust Marks that verified:
+
+```json
+{
+  "subject":  {"type": "federation_entity", "id": "anonymous", "properties": {"rate_key": "192.0.2.10"}},
+  "action":   {"name": "federation.resolve"},
+  "resource": {"type": "federation_entity", "id": "https://rp.example.com",
+               "properties": {"entity_types": ["openid_relying_party"], "trust_marks": ["https://ta.example.org/marks/certified"]}},
+  "context":  {"trust_anchor": "https://ta.example.org", "request": {"tracking_id": "tid:..."}}
+}
+```
+
+A permit is kept with `OIDF_PDP_CACHE_TTL_SECONDS` like any other. A resolve response the endpoint kept (up to 60
+seconds) is served without asking again. A PDP whose policy knows only the four older action names should be given
+a policy for the new ones before you list them.
+
+### Per-client settings
+
+Two extended properties on a client, set by an operator in PingFederate, each only tightening the deployment's
+setting. Registration never takes them from a relying party's metadata, and a renewal keeps them as the stored
+client has them.
+
+- `federation_pdp_token_issuance=true` asks the engine about this client's tokens even when `token_issuance` is not
+  listed. It needs `OIDF_PDP_MODE=authzen`.
+- `federation_pdp_fail_open=false` makes this client fail closed when the deployment fails open.
+
+Anything else - `federation_pdp_fail_open=true`, a value that is not `true` or `false` in lower case, or
+`federation_pdp_token_issuance=true` without an AuthZEN PDP - refuses every token for the client, with
+`federation.pdp.client_policy_invalid`. Both must be declared as extended properties in PingFederate
+([extended-properties.json](../extended-properties.json)), or PingFederate drops them.
+
+## Trust Marks under a retired key
+
+When another issuer rotates its key, the marks it signed with the old key stop verifying with its current keys. With
+`OIDF_FEDERATION_HISTORICAL_KEYS_CONSUME=true` PingFederate reads the issuer's historical keys endpoint (§8.7) - the
+one its verified Entity Configuration names - and checks such a mark with the retired key, if:
+
+- the key was valid when the mark was signed: its `iat` and `nbf`, when it has them, are at or before the mark's
+  `iat`, and the mark's `iat` is before the key's `exp`;
+- the key was not revoked before the mark was signed, and never as `compromised` or for a reason §8.7.3 does not
+  define;
+- the mark has an `exp`, and it is no later than the key's `exp`: a mark that never expires, or that would outlive the
+  key, is checked only with a current key.
+
+The response must be a 200 typed `application/jwk-set+jwt`, a JWT typed `jwk-set+jwt` with a `kid`, signed with one
+of the issuer's current keys, with the issuer's `iss`, an `iat` and `keys`, every key with a `kid` and an `exp`. Each
+issuer's answer is kept for `OIDF_FEDERATION_HISTORICAL_KEYS_CACHE_SECONDS` (an hour by default) on each node, and a
+failure for 60 seconds. The fetch spends one request from the validation's budget. Each check is
+`federation.trust_mark.historical_key_used` or `federation.trust_mark.historical_key_refused` with its `rule`, and each
+fetch counts in `oidf_federation_historical_keys_fetch_total{outcome}`.
+
+This reads §8.7.2's "After this time the key MUST NOT be considered valid" as: a key does not verify what was signed
+after its `exp`. The signer chooses a mark's `iat` and `exp`, so whoever holds a retired key that leaked can back-date a
+mark; holding the mark's `exp` to the key's is what bounds that. Once the key's `exp` has passed, every mark it could
+verify has expired too - so in effect a retired key serves only between leaving the issuer's `jwks` and its own `exp`.
+Before then, only the issuer revoking it as `compromised` stops a forgery, which is why the setting is off by default. Chains, status responses and delegations are checked with current keys only
+([limits](limits.md)).
 
 ## Reading the logs
 
@@ -433,6 +551,7 @@ and field is a WARN line naming the field, never its value.
 | `federation.key.read_failed` | PingFederate's current key could not be read, or was the wrong kind (`reason` `no_key`, `wrong_key_type` or `unreadable`): the key read before signs for at most 300 seconds more | No |
 | `attestation.evidence.conflict` | The attester was shown instance evidence already bound to another instance key or client: read `evidence_sha256`, `evidence_type`, `instance_subject`, `presented_jkt` (the key refused) and `bound_jkt` and `bound_client` (the key and client that hold the binding). Either the rightful holder's evidence has been used elsewhere, or a thief presented it first and the rightful holder is the one refused: `bound_jkt` is then the thief's. Right after a workload restarts with a new key it is most likely neither (the attester's README, "Evidence binding") | Yes, with `protocol` `Client Attestation` |
 | `attestation.issuer.client_refused` | A client's `attestation_*` configuration was refused, so the attester skips it and refuses its workloads with `invalid_client`: the subject is the client, `property` the property refused, and the reason `missing`, `malformed`, `above_ttl_cap`, `exceeds_ceiling`, `agent_id_configured` or `refused`. The value is never recorded; `server.log` has the WARN with the full message. Reported once per client until the refusal changes or the client loads again, so an index rebuild does not repeat it | Yes, with `protocol` `Client Attestation` |
+| `attestation.issuer.signing_key_refused` | The attester refused to sign a client's attestation because of the key its configuration named (X-B04): the subject is the client, `key_ref` the OpenBao transit key named (`none` for an inline key) and `rule` one of `one_key`, `inline_in_production`, `no_allow_list` (production, `OIDF_ATTESTER_SIGNING_KEYS` unset), `unlisted` (the key is not in that list), `issuer_not_bound` (it is, but not for the client's `attestation_issuer`) or `entry_names_key` (a federation or CIMD entry named a key of its own; raised when the entity is resolved, so again at every cache refresh, not per request). Never key material. Counted in `oidf_attester_signing_refusals_total{rule}` | Yes, with `protocol` `Client Attestation` |
 
 Not everything is an event. Serving an Entity Configuration, a fetch, a list or a resolve isn't; a refusal at a
 federation endpoint is a line on `com.pingidentity.ps.oidf.servlet.trustanchor.FederationErrors` (INFO for a

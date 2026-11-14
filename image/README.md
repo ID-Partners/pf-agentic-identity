@@ -266,9 +266,15 @@ python3 tools/ci/image-scan-gate.py --image image.grype.json --base base.grype.j
   --ours-manifest build/pingfederate/modules/MANIFEST
 ```
 
-The service images plan item R-CI6 also names - device-enrolment, the adapter and the SPIRE reader - do not
-exist yet: plan item R-I8 makes them in Phases 5 and 6, and they join the job then. Booting the image needs a
-licence, and waits for R-CI7 (Phase 4).
+Of the service images plan item R-CI6 also names, the SPIRE entry reader's exists
+(`services/spire-entry-reader/Dockerfile`, plan item R-I8, B07B) and
+is in the job: it is built after the reactor's jars, checked (user 65532 in SPIRE's socket group, no shell, no
+healthcheck, `/app` the reactor's jars byte for byte), given an SBOM, scanned by the same gate against its distroless
+base with `--base-name` and its own accepted findings (`--grype-config
+.github/grype-spire-entry-reader.yaml`), and booted beside a
+real SPIRE Server and agent by `conformance/spire/smoke.sh`. Like this image it is build-only. device-enrolment's and
+the adapter's do not exist yet: R-I8 makes them in Phase 6, and they join the job then. Booting the PingFederate image
+needs a licence, and waits for R-CI7 (Phase 4).
 
 ## The war assembler
 
@@ -502,7 +508,8 @@ never putting it in a layer works.
 ## What the image leaves to you
 
 Until 0.6.0 the image carried configuration that belongs to a deployment. It carries none of it now (plan item
-R-I3); each is yours to set at run time, and the rig in `conformance/` sets the ones it needs in `vars.env`.
+R-I3); each is yours to set at run time, and the rig in `conformance/` sets the ones it needs in its profile's environment
+(`profiles/conformance-fapi2.yaml`).
 
 | What | Until 0.6.0 | Now | To have it back |
 |---|---|---|---|

@@ -6,6 +6,12 @@
 #
 #   SUITE_PORT=49643 docker compose -f suite/suite-compose.yml -p pfai-suite up -d
 #
+# SUITE_IMAGE swaps the server image, nginx kept. The fapi2-attestation plan needs a suite that offers the
+# client_attestation variant with the plain_fapi profile, which no release does yet (plan item X-E09): a locally
+# built image of release-v5.3.1 with that change (../README.md, "The FAPI 2.0 plan with client_attestation"):
+#
+#   SUITE_IMAGE="$(../tools/ci/build-patched-suite.sh | tail -1)" docker compose -f suite/suite-compose.yml -p pfai-suite up -d
+#
 # BASE_URL is the origin the suite writes into everything it publishes - its RP's and trust anchor's entity
 # identifiers, its redirect URIs - so it is one a container reaches this machine by. The API answers on
 # https://localhost:$SUITE_PORT as well, which is what suite/run-plan.py uses.
@@ -14,7 +20,7 @@ services:
     image: mongo:6.0.13
     volumes: [ "suite-db:/data/db" ]
   server:
-    image: registry.gitlab.com/openid/conformance-suite:release-v5.3.1
+    image: ${SUITE_IMAGE:-registry.gitlab.com/openid/conformance-suite:release-v5.3.1}
     environment:
       BASE_URL: https://host.docker.internal:${SUITE_PORT:-9643}
       MONGODB_HOST: mongodb

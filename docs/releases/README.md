@@ -21,6 +21,10 @@ into the page when the release is cut.
 - [0.7.0.md](0.7.0.md) - Phase 4: durable, clustered and rotatable - migrations by `oidf-db-migrate.jar`, a
   cluster supported for what the suite verified, a leased SSF delivery engine, federation keys rotated without a
   restart, metrics and licensed CI; with its upgrade guide, [0.6.x-to-0.7.0.md](../operator/upgrading/0.6.x-to-0.7.0.md).
+- [0.8.0.md](0.8.0.md) - Phase 5: attestation features complete - client attestation on ABCA draft-11 with safe
+  attester sources, an agent registry, Trust Mark and key-storage minimums, revocation at the token endpoint, status
+  lists, outbound CAEP, SCIM agent instances and bound refresh tokens; with its upgrade guide,
+  [0.7.0-to-0.8.0.md](../operator/upgrading/0.7.0-to-0.8.0.md).
 
 Each page is published at [ID-Partners/pf-agentic-identity](https://github.com/ID-Partners/pf-agentic-identity)
 at its release's tag: from 0.6.1 with the release, and 0.3.0 to 0.6.0 as they were mirrored there. The page at a

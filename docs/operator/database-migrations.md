@@ -19,8 +19,8 @@ own history: one family can be migrated, adopted or validated without the others
 | Family | Versions | Tables | Used by |
 |---|---|---|---|
 | `platform` | V10-V99 | V10 `oidf_lease` | the `jdbc` lease backend ([clustering.md](clustering.md#leases)): apply it to the database `OIDF_LEASE_DATA_STORE_ID` names |
-| `federation` | V100-V199 | V100 `hosted_entity`, `hosted_entity_audit_log`; V101 adds `hosted_entity_audit_log.actor`; V102 `trust_mark_grant`, `trust_mark_audit_log`; V103 `federation_key_current`, `federation_key_history`; V104 `federation_key_observed`; V105 `federation_subordinate`, `federation_subordinate_key_change`, `federation_subordinate_audit_log`; V106 `federation_subordinate_observation`, `federation_subordinate_key_change.decision_reason`, a PENDING `federation_subordinate.status` | the authority's hosted entities, Trust Marks, key history, key observations and pinned subordinates (`OIDF_FEDERATION_SUBORDINATE_STORE=database`) |
-| `agent` | V200-V299 | V200 `agent_identity` | the agent identity registry |
+| `federation` | V100-V199 | V100 `hosted_entity`, `hosted_entity_audit_log`; V101 adds `hosted_entity_audit_log.actor`; V102 `trust_mark_grant`, `trust_mark_audit_log`; V103 `federation_key_current`, `federation_key_history`; V104 `federation_key_observed`; V105 `federation_subordinate`, `federation_subordinate_key_change`, `federation_subordinate_audit_log`; V106 `federation_subordinate_observation`, `federation_subordinate_key_change.decision_reason`, a PENDING `federation_subordinate.status`; V107 `hosted_entity.federation_jwks` and `hosted_entity.entity_configuration` (a SELF_SIGNED entity's own keys and the configuration it published) | the authority's hosted entities, Trust Marks, key history, key observations and pinned subordinates (`OIDF_FEDERATION_SUBORDINATE_STORE=database`) |
+| `agent` | V200-V299 | V200 `agent_identity`; V201 adds `agent_identity.status` (`active`, `suspended` or `revoked`; every existing row `active`), `status_reason`, `status_changed_at`, `status_changed_by`, `row_version` and an index on `(iss, client_id, status)`, and `agent_status_audit_log` (append-only, one row per status change); V202 adds `agent_identity.status_idx`, each agent's entry in the attester's Token Status List, drawn at random and backfilled for every existing row (X-E12) | the attester's agent registry (`OIDF_AGENT_REGISTRY_MODE=database`, ATTESTATION_ISSUER): run `migrate --family agent` and `grants --family agent` before a 0.8.0 attester starts with it, or its part is `FAILED_CONFIG` and issuance answers 503 |
 | `ssf` | V300-V399 | V300 `ssf_streams`, `ssf_stream_subjects`, `ssf_pending_sets`, `ssf_scim_users`; V301 adds `ssf_streams.owner_client_id`, `description`, `min_verification_interval` and `inactivity_timeout`; V302 makes `ssf_streams.push_auth_header` `TEXT`; V303 `ssf_stream_lease` (a push stream's lease, backfilled for the push streams already there); V304 adds `ssf_pending_sets.seq`, numbered in the order a backlog had, its sequence `ssf_pending_sets_seq` and an index on `(stream_id, seq)`; V305 adds `ssf_streams.last_verification_at`; V306 `ssf_dead_sets` (the SETs a receiver refused for good, F-0361); V307 `ssf_receiver_inbox` (the receiver's inbound SETs by `(iss, jti)`, with partial indexes on pending `next_attempt_at` and on `ack_due`) and `ssf_receiver_set_errs` (refused polled SETs until reported); V308 adds `ssf_streams.row_version` (0 for the streams there), `last_activity_at` (backfilled with `now()`) and `paused_by`, and `ssf_stream_lease.failing_since`; V309 `ssf_emission_outbox` (an event raised and not yet fanned out, its id sequence `ssf_emission_outbox_id_seq` and an index on `(subject_key, id)`), `ssf_pending_sets.emission_id` with a unique partial index on `(emission_id, stream_id)`, and `ssf_logout_replay` (a logout hint's replay key until its bound); V310 adds `ssf_scim_users.user_name_key` (unique index; the userName compared case and width aside, backfilled at start, left unset for a duplicate) and `email_key`, `ssf_stream_subjects.email_key` and an index on `ssf_stream_subjects (subject_key)`, and `ssf_logout_pending` (a sign-off waiting for its confirmation, by the SHA-256 of its request state, with an index on `expires_at`) | the SSF transmitter's tables store (`storeDialect=tables`); V303-V310 are what SSF on a cluster needs ([clustering.md](clustering.md#ssf-push-streams), [SSF receiver](clustering.md#ssf-receiver), [SSF emission](clustering.md#ssf-emission)) |
 | `enrolment` | V400-V499 | none yet | - |
 | `mdm-adapter` | V500-V599 | none yet | - |
@@ -282,9 +282,18 @@ and records in its own ledger, `idm.schema_migration`. The SSF store checks that
 (`platform.jdbc.IomLedger`): `0000-base-schema` and `0001-add-shared-signals-ssf`, and with `receiverInstanceRegistry`
 on, `002-backfill-may-attrs` and `006-add-agent-instance-registry` too. A name missing is `FAILED_CONFIG` naming it;
 the role needs `SELECT` on `idm.schema_migration`. Checksums are not compared there: the model repository re-applies a
-migration with `ON CONFLICT (name) DO UPDATE SET checksum`. The Identity Object Model's other readers outside the
-component lifecycle - the instance-registry datasource plugin and the device-enrolment service - are not checked
-(finding F-0510).
+migration with `ON CONFLICT (name) DO UPDATE SET checksum`.
+
+The model's two other readers are held to the same ledger from 0.8.0 ([F-0510](../findings.md#f-0510)), for
+`0000-base-schema`, `002-backfill-may-attrs` and `006-add-agent-instance-registry`:
+
+- **The instance-registry datasource plugin** checks on its first lookup or connection test that reaches the database,
+  not at `configure`, so a data store that is down when PingFederate starts does not refuse the driver for good. A
+  missing name answers every lookup with the refusal, logged once at ERROR, and the lookup fails closed as an
+  unconfigured driver's does. It checks again on each lookup until the ledger names the migration, so recording or
+  applying it is enough: no reconfigure or restart. A database that cannot be read fails that lookup only.
+- **device-enrolment** checks at start-up, unless `REGISTRY=memory`. A missing name stops it with exit status 1 and
+  the refusal on stderr. A database it cannot read is tried three times, two seconds apart, before it stops.
 
 ### The Identity Object Model's ledger
 
@@ -293,7 +302,21 @@ is empty or missing, even where the schema is there. Two are known: the live dir
 `spec/identity-object-model.sql` directly (idp-scim-service, `migrations/006-add-agent-instance-registry.test-report.md`:
 "0000 and 002 genuinely were never recorded there"), and a database built from `docker-entrypoint-initdb.d` scripts,
 as idp-pingfed-ssf-servelet's `ldm-store` is. **From 0.7.0 an `ldm` SSF store on such a database is `FAILED_CONFIG`
-until its ledger names what the store needs** (finding F-0511). For each name the start-up check reports:
+until its ledger names what the store needs** (finding F-0511), and from 0.8.0 the datasource plugin and
+device-enrolment refuse it too. The refusal names each missing migration with what a read-only probe of the database
+found (from 0.8.0), and the operator decides from that:
+
+- `its effect is not there, so apply it`: nothing that migration creates is there.
+- `its effect is already there, so record it in idm.schema_migration`: what it creates is there, so the database was
+  built some other way.
+- `whether its effect is there is unknown, so check by hand before you record or apply it`: no probe for that name, or
+  the probe could not run.
+
+The probes only read; they never write to `idm.schema_migration`. Each looks for one thing that migration creates and
+nothing before it does: `idm.entry` for `0000-base-schema`, the `ssfStream` class for `0001-add-shared-signals-ssf`,
+`account`'s MAY list (empty until 002 fills it) for `002-backfill-may-attrs`, and the `agentInstance` class with
+`pingoneUserId` on `involvedParty` for `006-add-agent-instance-registry`. The last is "not there" when 002 ran after
+006 and took `pingoneUserId` away; re-running 006 is then the cure. For each name:
 
 **The model repository's reconcile script does this for you.** idp-scim-service's `scripts/reconcile-ledger.sql`
 (merged to its main as commit `e9652bd`, PR #2, 2026-10-09) is a plain psql script. By default it
@@ -328,4 +351,5 @@ The start-up check reports, for each name:
   "Ordering matters"). Where 002 is missing and 006 is
   applied - the live directory with `receiverInstanceRegistry` on - apply 002, then re-run 006, which is idempotent.
 
-Then restart PingFederate.
+Then restart PingFederate (for the `ldm` SSF store) or device-enrolment; the datasource plugin picks the change up on
+its next lookup.

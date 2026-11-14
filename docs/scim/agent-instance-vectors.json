@@ -1,0 +1,1115 @@
+{
+  "description": "SCIM vectors for the AgentInstance resource type (urn:idpartners:params:scim:schemas:core:1.0:AgentInstance), plan item X-E14. Each vector runs against a fresh instance in each register it names, in initial_status. Paths are relative to the SCIM base (/federation/scim/v2 at the attester). Placeholders: {id} the instance's agent_id, {owner} its owner.value, {device} its device id (device instances only), {register} device_instance or workload_agent, {version} the ETag its GET answers before the vector's first step. expect.body is a subset: each member given must be present and equal, an object compared member by member, an array element by element with the same length. Every error body carries the RFC 7644 error schema; expect.scimType is its scimType. Written for pf-agentic-identity's AgentInstanceScimContractTest; a copy lives in idp-scim-service docs/agent-instance-scim/.",
+  "schema": "urn:idpartners:params:scim:schemas:core:1.0:AgentInstance",
+  "error_schema": "urn:ietf:params:scim:api:messages:2.0:Error",
+  "vectors": [
+    {
+      "name": "read an instance",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances/{id}"
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "schemas": [
+                "urn:idpartners:params:scim:schemas:core:1.0:AgentInstance"
+              ],
+              "id": "{id}",
+              "register": "{register}",
+              "status": "active",
+              "active": true,
+              "owner": {
+                "value": "{owner}"
+              },
+              "meta": {
+                "resourceType": "AgentInstance",
+                "version": "{version}"
+              }
+            },
+            "headers": {
+              "ETag": "{version}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "read an unknown id",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances/no-such-instance"
+          },
+          "expect": {
+            "status": 404
+          }
+        }
+      ]
+    },
+    {
+      "name": "list by owner",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances",
+            "query": {
+              "filter": "owner.value eq \"{owner}\""
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "totalResults": 1,
+              "Resources": [
+                {
+                  "id": "{id}",
+                  "status": "active"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "list by owner and status",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances",
+            "query": {
+              "filter": "owner.value eq \"{owner}\" and status eq \"suspended\""
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "totalResults": 0,
+              "Resources": []
+            }
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances",
+            "query": {
+              "filter": "OWNER.VALUE eq \"{owner}\" AND status EQ \"active\""
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "totalResults": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "list by id with the schema URN",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances",
+            "query": {
+              "filter": "urn:idpartners:params:scim:schemas:core:1.0:AgentInstance:id eq \"{id}\""
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "totalResults": 1,
+              "Resources": [
+                {
+                  "id": "{id}"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "list by device",
+      "registers": [
+        "device_instance"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances",
+            "query": {
+              "filter": "device.value eq \"{device}\""
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "totalResults": 1,
+              "Resources": [
+                {
+                  "id": "{id}",
+                  "device": {
+                    "value": "{device}"
+                  }
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a list must name an id, an owner or a device",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances",
+            "query": {
+              "filter": "status eq \"active\""
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "tooMany"
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances"
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "tooMany"
+          }
+        }
+      ]
+    },
+    {
+      "name": "an unsupported filter",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances",
+            "query": {
+              "filter": "owner.value eq \"{owner}\" or status eq \"active\""
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "invalidFilter"
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances",
+            "query": {
+              "filter": "status gt \"active\""
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "invalidFilter"
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances",
+            "query": {
+              "filter": "userName eq \"x\""
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "invalidFilter"
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances",
+            "query": {
+              "filter": "active eq \"true\""
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "invalidFilter"
+          }
+        }
+      ]
+    },
+    {
+      "name": "a status value that is not one of the three is refused",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "note": "RFC 7644 \u00a73.4.2.2: refused, not read as any status",
+      "steps": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances",
+            "query": {
+              "filter": "owner.value eq \"{owner}\" and status eq \"bogus\""
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "invalidFilter"
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances",
+            "query": {
+              "filter": "owner.value eq \"{owner}\" and status eq \"Active\""
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "invalidFilter"
+          }
+        }
+      ]
+    },
+    {
+      "name": "suspend by status",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "status",
+                  "value": "suspended"
+                },
+                {
+                  "op": "replace",
+                  "path": "status_reason",
+                  "value": "INC-1"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "id": "{id}",
+              "status": "suspended",
+              "active": false
+            }
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances/{id}"
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "status": "suspended",
+              "active": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "suspend by active false, reactivate by active true",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "active",
+                  "value": false
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "status": "suspended"
+            }
+          }
+        },
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "value": {
+                    "active": true,
+                    "status_reason": "INC-1 closed"
+                  }
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "status": "active",
+              "active": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "revoke, and revoked is terminal",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "status",
+                  "value": "revoked"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "status": "revoked",
+              "active": false
+            }
+          }
+        },
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "status",
+                  "value": "active"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "invalidValue"
+          }
+        },
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "active",
+                  "value": true
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "invalidValue"
+          }
+        },
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "status",
+                  "value": "suspended"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "invalidValue"
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances/{id}"
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "status": "revoked"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "a revoked instance stays revoked",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "revoked",
+      "steps": [
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "status",
+                  "value": "revoked"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "status": "revoked"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "the same status writes nothing and answers 200",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "status",
+                  "value": "active"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "status": "active"
+            },
+            "headers": {
+              "ETag": "{version}"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "If-Match with the current version",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "headers": {
+              "If-Match": "{version}"
+            },
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "status",
+                  "value": "suspended"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "status": "suspended"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "If-Match with a stale version is 412",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "headers": {
+              "If-Match": "W/\"stale\""
+            },
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "status",
+                  "value": "suspended"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 412
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances/{id}"
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "status": "active"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "read-only and unknown attributes",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "owner.value",
+                  "value": "someone-else"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "mutability"
+          }
+        },
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "id",
+                  "value": "x"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "mutability"
+          }
+        },
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "nickname",
+                  "value": "x"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "invalidPath"
+          }
+        },
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "remove",
+                  "path": "status"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "mutability"
+          }
+        }
+      ]
+    },
+    {
+      "name": "bad values",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "status",
+                  "value": "expired"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "invalidValue"
+          }
+        },
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "active",
+                  "value": "false"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "invalidValue"
+          }
+        },
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "status",
+                  "value": "suspended"
+                },
+                {
+                  "op": "replace",
+                  "path": "active",
+                  "value": true
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "invalidValue"
+          }
+        },
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "status_reason",
+                  "value": "only a reason"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "invalidValue"
+          }
+        },
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/{id}",
+            "body": {
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "status",
+                  "value": "suspended"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 400,
+            "scimType": "invalidSyntax"
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/AgentInstances/{id}"
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "status": "active"
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "PATCH of an unknown id",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "PATCH",
+            "path": "/AgentInstances/no-such-instance",
+            "body": {
+              "schemas": [
+                "urn:ietf:params:scim:api:messages:2.0:PatchOp"
+              ],
+              "Operations": [
+                {
+                  "op": "replace",
+                  "path": "status",
+                  "value": "suspended"
+                }
+              ]
+            }
+          },
+          "expect": {
+            "status": 404
+          }
+        }
+      ]
+    },
+    {
+      "name": "methods the resource does not take",
+      "registers": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "DELETE",
+            "path": "/AgentInstances/{id}"
+          },
+          "expect": {
+            "status": 405
+          }
+        },
+        {
+          "request": {
+            "method": "PUT",
+            "path": "/AgentInstances/{id}",
+            "body": {}
+          },
+          "expect": {
+            "status": 405
+          }
+        },
+        {
+          "request": {
+            "method": "POST",
+            "path": "/AgentInstances",
+            "body": {}
+          },
+          "expect": {
+            "status": 405
+          }
+        }
+      ]
+    },
+    {
+      "name": "discovery",
+      "registers": [
+        "device_instance"
+      ],
+      "initial_status": "active",
+      "steps": [
+        {
+          "request": {
+            "method": "GET",
+            "path": "/Schemas"
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "totalResults": 1,
+              "Resources": [
+                {
+                  "id": "urn:idpartners:params:scim:schemas:core:1.0:AgentInstance"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/Schemas/urn:idpartners:params:scim:schemas:core:1.0:AgentInstance"
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "id": "urn:idpartners:params:scim:schemas:core:1.0:AgentInstance",
+              "name": "AgentInstance"
+            }
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/ResourceTypes"
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "totalResults": 1,
+              "Resources": [
+                {
+                  "id": "AgentInstance",
+                  "endpoint": "/AgentInstances",
+                  "schema": "urn:idpartners:params:scim:schemas:core:1.0:AgentInstance"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/ResourceTypes/AgentInstance"
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "schema": "urn:idpartners:params:scim:schemas:core:1.0:AgentInstance"
+            }
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/ServiceProviderConfig"
+          },
+          "expect": {
+            "status": 200,
+            "body": {
+              "patch": {
+                "supported": true
+              },
+              "filter": {
+                "supported": true
+              },
+              "etag": {
+                "supported": true
+              },
+              "bulk": {
+                "supported": false
+              }
+            }
+          }
+        },
+        {
+          "request": {
+            "method": "GET",
+            "path": "/Schemas/urn:example:other"
+          },
+          "expect": {
+            "status": 404
+          }
+        }
+      ]
+    }
+  ]
+}

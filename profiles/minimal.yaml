@@ -1,0 +1,36 @@
+# The reference stacks' configuration (reference/single and reference/cluster): a JWT access token manager, the
+# runtime certificate, the PostgreSQL data stores and a smoke client, under the production profile, with the Shared
+# Signals transmitter on its PostgreSQL tables and every other component switched off. The transmitter runs without
+# modules/ssf's clients and scopes, as the stacks have always run it.
+#
+# The cluster keeps PingFederate's clients in PostgreSQL too: --set pf.client_storage=jdbc. What is a node's own (its
+# operational mode, its archive's path, the risks a single node accepts) stays in the stack's pf.env.
+profile: minimal
+description: The reference stacks' configuration - tokens, TLS, PostgreSQL data stores, SSF transmitter
+pf:
+  base_url: https://pf.reference.test:57105
+  naming: { id: reference, display: Reference }
+  client_storage: xml
+  scopes: []
+  user_token_mapping: false
+  openid_connect: false
+  postgres: { ca_file: /opt/reference/tls/ca.crt }
+  smoke_client:
+    client_id: reference-smoke
+    name: Reference stack smoke check
+    scope: reference.smoke
+    scope_description: The reference stacks' smoke check
+deployment:
+  mode: production
+material:
+  runtime_tls: { p12: pf.p12, key_id: pf-reference-tls }
+  trusted_cas: { pf-reference-ca: ca.crt }
+features:
+  ssf: { transmitter: true, pf_objects: false, receiver: false }
+env:
+  PING_IDENTITY_ACCEPT_EULA: "YES"
+  # The transmitter on the PostgreSQL tables (the dialect a cluster needs), with its leases there too.
+  OIDF_SSF_STORE_DIALECT: tables
+  OIDF_LEASE_BACKEND: jdbc
+  # Production keeps a push stream's authorization header only sealed under this key.
+  OIDF_SSF_SECRET_KEY_FILE: /run/oidf/ssf-secret-key

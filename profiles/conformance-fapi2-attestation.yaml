@@ -1,0 +1,27 @@
+# The conformance rig for the FAPI 2.0 plan with client_attestation (X-E09): the suite's clients authenticate by
+# attest_jwt_client_auth, the suite minting each Client Attestation with its own attester key. Two more FAPI 2.0
+# clients, conformance-fapi2-attest-client1 and -client2, whose PingFederate authentication is private_key_jwt with
+# a bridge key: ClientAttestationAuthFilter verifies the attestation and its PoP and forwards an assertion signed
+# with that key. The suite's attester is trusted directly (oidf.mock.attesters, development only), and the bridge
+# keys bind each client to it (OIDF_BRIDGE_SIGNING_KEYS). Both files are gen-keys.sh's, under keys/, and reach the
+# container through docker-compose.fapi2-attestation.yml, which up.sh lays over the rig for this profile.
+#
+# The plan needs a suite that offers client_attestation with the plain_fapi profile; release-v5.3.1 offers it only
+# with the VCI profiles. suite/suite-compose.yml's SUITE_IMAGE runs a patched one.
+profile: conformance-fapi2-attestation
+description: The conformance rig for the FAPI 2.0 plan with attest_jwt_client_auth, the suite as attester
+extends: conformance-fapi2
+features:
+  attestation: { auth: true, issuer: false }
+material:
+  jwks:
+    fapi2-attest-client1: fapi2-attest-client1.public.jwks.json
+    fapi2-attest-client2: fapi2-attest-client2.public.jwks.json
+conformance:
+  plan: fapi2-attestation
+  fapi2_attestation: true
+env:
+  # Mounted by docker-compose.fapi2-attestation.yml: each attested client's bridge key, inline (config, development
+  # only; a deployment keeps them in OpenBao), and the attester it is bound to.
+  OIDF_BRIDGE_SIGNER_BACKING: config
+  OIDF_BRIDGE_SIGNING_KEYS: /opt/oidf-rig/fapi2-attestation-bridge-keys.json

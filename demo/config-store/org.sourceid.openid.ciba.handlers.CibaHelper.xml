@@ -7,8 +7,8 @@
   60: the conformance plan sends a request object with exp seventy minutes out and one with nbf
   seventy minutes back and expects both refused, and at 720 both are accepted.
 
-  Like the cipher list next to it, this is laid over the image AND carried in the archive (author.sh
-  stages it before the authoring server first starts, export.sh checks it is in the export): an
+  Like the cipher list next to it, this is laid over the image AND carried in the archive (tools/profile.py
+  author stages it before the authoring server first starts, and checks it is in the export): an
   archive import writes the config store, and one without this file would write the defaults back.
 
   default-polling-interval is what the token endpoint tells a poll-mode client (interval), and what

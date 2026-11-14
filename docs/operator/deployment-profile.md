@@ -29,7 +29,7 @@ refuses are named at the top of the page.
 | `OIDF_SSF_RECEIVER_TOKEN_ENDPOINT`, `OIDF_SSF_RECEIVER_TRANSMITTER_CONFIGURATION_URL`, `OIDF_SSF_RECEIVER_PUSH_ENDPOINT_URL` | an `http://` URL (the receiver's tokens would cross the network in clear) | `SSF_RECEIVER` |
 | `OIDF_AUTHORITY_JDBC_URL` | set | `HOSTING`, `OPERATOR_API` |
 | `OIDF_OPERATOR_INSECURE_TLS` | `true` | `OPERATOR_API` |
-| `OIDF_ATTESTER_CIMD_URL` | set | `ATTESTATION_ISSUER` |
+| `OIDF_WALLET_PROVIDER_JWKS` (static wallet provider keys, trusted with no trust chain; from 0.8.0) | set | `ATTESTATION_ISSUER` |
 | `oidf.mock.attesters` (system property) | set | `ATTESTATION_AUTH` |
 | `OIDF_REDIS_URL`, `REDIS_URL` | a `redis://` URL (plaintext; `rediss://` is allowed); `REDIS_URL` only while `OIDF_REDIS_URL` and `oidf.redis.url` are unset, since the client reads it only then | `ATTESTATION_AUTH`, `ATTESTATION_ISSUER`, `OPERATOR_API` |
 | `jdk.internal.httpclient.disableHostnameVerification` (system property) | set, with any value | every component |
@@ -49,6 +49,8 @@ its risk, as a comma-separated list of ids, each alone or with the last day it h
 | `OIDF_FEDERATION_RESOLVE_DISCOVERY` | `any` | `resolve-any` | `FEDERATION`, `HOSTING` |
 | `OIDF_EVENTS_AUDIT` | `false` | `audit-off` | every component |
 | `OIDF_LEASE_BACKEND` | `redis` on a clustered node (from 0.7.0) | `redis-lease` | `SSF`, `SSF_RECEIVER`, `AUTO_REGISTRATION` ([clustering.md](clustering.md#leases)) |
+| `OIDF_CLIENT_REVOCATION_MODE` | `off` (from 0.8.0; unset is not `off`) | `client-revocation-off` | `ATTESTATION_AUTH` |
+| `OIDF_ATTESTATION_REFRESH_BINDING` | `off` (from 0.8.0; the default is `on`) | `refresh-binding-off` | `ATTESTATION_AUTH` |
 
 An entry that is empty, unknown, expired, repeated, or undated where a date is needed is not accepted; the start-up
 audit lists it, and the switch that needed it refuses its components.
@@ -60,7 +62,10 @@ production, one none of whose settings is set, and it disables itself.
 **Unknown names.** An `OIDF_*` environment variable under a catalogue's family (`OIDF_FEDERATION_`, `OIDF_SSF_`,
 `OIDF_REDIS_` and the rest, listed on each configuration page) that no catalogue declares refuses that family's
 components: `OIDF_FEDERATION_TRUST_ANCHOR` for `OIDF_FEDERATION_TRUST_ANCHORS` takes federation down, not SSF. A
-misspelling is the usual cause. An `OIDF_*` name under no family is only a warning.
+misspelling is the usual cause. An `OIDF_*` name under no family is only a warning. A name a release removed, such
+as `OIDF_ATTESTER_CIMD_URL` (0.8.0), is not unknown: its catalogue still declares it, and refuses its components in
+every profile when it is set, naming what replaces it, on the components' first read of that catalogue (preflight
+shows it as `refused when it is read`).
 
 **A governed value that cannot be read**, such as `OIDF_FETCH_ALLOW_HTTP=yes`, is refused as if it asked for the
 governed value: production cannot tell what it meant.

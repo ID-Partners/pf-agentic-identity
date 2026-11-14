@@ -1,0 +1,49 @@
+# The conformance rig (conformance/up.sh) for the suite's FAPI 2.0 plan. It is also the base the other conformance
+# profiles extend: the rig applies one configuration for the FAPI 2.0, FAPI-CIBA and SSF plans, so all three carry the
+# FAPI 2.0, CIBA and SSF clients, and only the plan they are run for differs.
+#
+# What the env block reproduces is conformance/vars.env, which the rig ran on until phase 3 of
+# private/plans/agentic-idp-profiles.md. Three switches stay unset, as they always were there: the root sets a left-out
+# feature's switch false, but the rig never set these, and under the development profile an unset switch is on.
+profile: conformance-fapi2
+description: The conformance rig for the FAPI 2.0 plan, and the base of the other conformance profiles
+pf:
+  base_url: https://localhost:9031
+  naming: { id: conformance, display: Conformance }
+  extended_properties: true
+deployment:
+  mode: development
+material:
+  dir: conformance/keys
+  secrets: conformance/secrets.env
+  runtime_tls: { p12: pf-runtime-tls.p12, key_id: pf-runtime-tls }
+  trusted_cas: { pf-runtime-tls-ca: pf-runtime-tls-ca.crt }
+  jwks:
+    fapi2-client1: fapi2-client1.public.jwks.json
+    fapi2-client2: fapi2-client2.public.jwks.json
+    ssf-receiver: ssf-receiver.public.jwks.json
+    ciba-client1: ciba-client1.public.jwks.json
+    ciba-client2: ciba-client2.public.jwks.json
+  config_store: conformance/config-store
+features:
+  fapi2: { par: required }
+  ciba: { authenticator: sim }
+  ssf: { emitter: true }
+conformance:
+  plan: fapi2
+  suite_base_urls: [https://www.certification.openid.net, https://localhost.emobix.co.uk:9643]
+  ciba: { delivery_mode: POLL }
+env:
+  # Ping Identity's licence agreement, accepted for this rig: the image accepts it for nobody.
+  PING_IDENTITY_ACCEPT_EULA: "YES"
+  # PF's plain HTTP runtime listener, which the entrypoint opens only under the development profile.
+  PF_RUN_PF_HTTP_PORT: "9080"
+  # The servlet introspects at the container's own loopback, whatever the issuer is: PF calling itself out through
+  # whatever fronts it would be handed its own self-signed certificate. localhost, because that is the name it carries.
+  OIDF_SSF_INTROSPECTION_ENDPOINT: https://localhost:9031/as/introspect.oauth2
+  OIDF_SSF_INTROSPECTION_INSECURE_TLS: "true"
+  # The CAEP Interop Profile's stream model (section 2.4.4): every subject is in a stream without an add-subject.
+  OIDF_SSF_DEFAULT_SUBJECTS: ALL
+  OIDF_HOSTING_ENABLED: null
+  OIDF_OPERATOR_API_ENABLED: null
+  OIDF_ATTESTATION_ISSUER_ENABLED: null

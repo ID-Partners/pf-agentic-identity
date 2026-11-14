@@ -203,7 +203,7 @@ the response belt and the issuance criterion on `context.OAuthAuthorizationDetai
 ## Known adjacent issues, deliberately out of scope
 
 - The attestation's `aud` is not validated (`JwtCodec.verifyAgainstKeys` sets
-  `setSkipDefaultAudienceValidation`). This is by specification, not an omission: ABCA-10 §4 defines the
+  `setSkipDefaultAudienceValidation`). This is by specification, not an omission: ABCA-11 §4 defines the
   Client Attestation JWT's claims as `sub`, `exp`, `cnf` and optionally `iat` — no `aud` — and says "The
   JWT MAY contain other claims. All claims that are not understood by implementations MUST be ignored."
   The audience lives on the PoP (§5.1: `aud` REQUIRED, the AS's issuer identifier), which the verifier

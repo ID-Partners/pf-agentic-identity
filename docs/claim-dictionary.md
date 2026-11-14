@@ -10,7 +10,7 @@ extension, or a deliberate divergence, without reading the code.
 
 ## Client Attestation JWT
 
-`draft-ietf-oauth-attestation-based-client-auth-10` (6 July 2026). Issued by the platform backend
+`draft-ietf-oauth-attestation-based-client-auth-11` (3 September 2026). Issued by the platform backend
 acting as Client Attester; verified by PingFederate.
 
 | Claim | Spec status | Value here |
@@ -27,10 +27,24 @@ acting as Client Attester; verified by PingFederate.
 | `authenticator_ref` | extension | Reference to the bound passkey credential (not the credential itself) |
 | `agent_build` | extension | Agent platform build/version |
 | `uv_policy` | extension | The user-verification reuse window in force, seconds |
+| `status` | extension here; `draft-ietf-oauth-status-list-21` §6.2 | Only with a Token Status List on (X-E12): `{"status_list": {"idx": <n>, "uri": <list URL>}}`. `idx` is the instance's own index (random, unique, never reused; IOM `attrs.statusIdx`, or `agent_identity.status_idx` for a workload agent). `uri` is the list the attester serves: `ENROLMENT_STATUS_LIST_URL` for a device instance, `OIDF_ATTESTER_STATUS_LIST_URL/<list>` (one list per attester issuer) for a workload agent. ABCA defines no `status`; it allows claims it does not define. A verifier in `status_list` mode refuses an attestation without it. |
 
 Permitted `key_storage` / `user_authentication` values, verbatim from Appendix D:
 `iso_18045_high` (VAN.5), `iso_18045_moderate` (VAN.4), `iso_18045_enhanced-basic` (VAN.3),
 `iso_18045_basic` (VAN.2).
+
+**Shape.** Appendix D.1 defines each as "A non-empty array of case sensitive strings" (OpenID4VCI 1.0, read
+2026-10-19). The device attester mints a single string, so the authorization server accepts both: a string is read
+as an array of one, and an array is relied on for its weakest value.
+
+**At the authorization server** (from plan item X-E08, F-0760). A client's `attestation_min_key_storage` and
+`attestation_min_user_authentication`, or the server-wide `OIDF_ATTESTATION_MIN_KEY_STORAGE` and
+`OIDF_ATTESTATION_MIN_USER_AUTHENTICATION`, set the lowest level accepted, compared on ISO/IEC 18045's order:
+basic < enhanced-basic < moderate < high. A level below the minimum, a missing claim, or a value outside the four
+(another ecosystem's value, another spelling, an empty array) is refused `invalid_client_attestation`. The attested
+levels also reach the RAR plugin's PDP request, as `att_key_storage` and `att_user_authentication` for the governance
+engine and under `context.attestation` for AuthZEN, so a policy can require a level per `authorization_details` type.
+A level the attestation does not assert, or that the server does not recognise, is left out, so such a policy denies.
 
 ## Client Attestation PoP JWT
 
@@ -128,22 +142,48 @@ rule is about having superiors, not about being an anchor.
 
 ### 1. `iss` retained on the attestation and PoP
 
-Draft -08 removed `iss` from both JWTs; -10 does not define it. We keep it.
+Draft -08 removed `iss` from both JWTs; -11 (re-read 2026-10-12) still defines it on neither: §4 lists the
+attestation's claims and §5.1 the PoP's, and neither names `iss`. Our attesters keep emitting it, and the verifier
+uses it when it is there. On the PoP it is optional: one without `iss` is accepted, and one that has it must name the
+attestation's client (`ClientAttestationVerifier`, pinned by `ClientAttestationVerifierTest`).
 
-**Why:** this repo's `ClientAttestationVerifier` resolves the attester's signing keys *by* `iss` —
+**Since 0.8.0 the verifier also accepts an attestation without `iss`** (plan item X-E04, F-0740), from another
+implementation's attester. It names the attester in this order: the client's bound attester when it is bound to
+exactly one; else the subject of the `trust_chain` header's self-issued first statement; else the one attester whose
+trusted keys include the header's `kid`. If none applies, it refuses with `invalid_client_attestation`. Each only
+names a candidate: the resolver establishes trust in it as it would for an `iss`, the signature must verify under its
+keys, and the client's binding check applies. A present `iss` is used as before and must match the signature.
+
+**Why `iss` is kept:** this repo's `ClientAttestationVerifier` resolves the attester's signing keys *by* its identity —
 through `FederationAttesterKeyResolver`, which walks an OpenID Federation trust chain from the attester
 up to the anchor. Removing `iss` would mean falling back to the draft's suggested `x5c` / `kid`+`jku`
 resolution and discarding the federation-based trust path, which is the whole point of the
-architecture. The draft explicitly puts attester trust establishment **out of scope** (§9.8), so this
+architecture. The draft explicitly puts attester trust establishment **out of scope** (§10.8), so this
 is filling a gap the spec declines to fill rather than contradicting it.
 
-**Revisit if:** the draft later defines a federation-based resolution mechanism of its own.
+**Revisit if:** the draft later defines a federation-based resolution mechanism of its own, or one of its own for
+naming the attester of an attestation without `iss`.
 
 ### 2. Reuse within the 15-minute window, where EUDI mandates single-use
 
 The EUDI ARF requires a Wallet Instance Attestation to be sent to **at most one** verifier
 (TS3 §2.2.1.1), explicitly to prevent issuer linkability, with once-only attestation mandatory.
-draft-10 permits reuse. We reuse.
+-11 permits reuse, in the same words as -10 (§10.2, re-read 2026-10-12): the design "deliberately allows for a
+Client Instance to re-use a single Client Attestation JWT in multiple interactions/requests". We reuse by default.
+
+**Single use is opt-in** (plan item X-E06, F-0750, 0.8.0). A client's `attestation_single_use` extended property, or
+`OIDF_ATTESTATION_SINGLE_USE` for every client, makes each attestation authenticate once. Once the attestation, its
+proof and the `authorization_details` check have passed, the verifier records a digest of the attestation's decoded
+header, payload and signature in the replay store until no node can accept it. The digest is of the decoded segments,
+not the string presented, because jose4j verifies the same signature with padding or whitespace appended or the last
+character's unused bits flipped. A second presentation, in any spelling, is refused `use_fresh_attestation` (401); a
+store outage is 503. An attestation without its key cannot be spent on the client's behalf, since the record follows
+the proof. A refusal after the verifier accepts - the token-endpoint filter's own later checks, or PingFederate
+refusing the request - has still spent the attestation, so the client's retry needs a fresh one. The cost is one
+issuance call to the attester per authenticated request, so two for a PAR followed by its token request, and
+`OIDF_ATTESTER_ISSUANCE_REQUESTS_PER_MINUTE` (60 by default, F-0060) limits those per caller: a deployment that turns
+single use on raises that limit to its single-use clients' request rate. It is the setting for a deployment that wants
+the ARF's posture, or that wants a leaked attestation and key to buy one token rather than the rest of the window.
 
 **Why:** the linkability argument does not apply. An ARF wallet presents its WIA to many independent
 PID and attestation providers, so a reused artefact becomes a cross-provider correlation handle. Our
@@ -153,7 +193,8 @@ to correlate with. The instance identity is pseudonymous regardless — carried 
 that single verifier learns no user identity from the attestation.
 
 **Revisit if:** the attestation is ever presented to a second relying party. At that moment this
-divergence becomes a real privacy defect, not a justified simplification.
+divergence becomes a real privacy defect, not a justified simplification, and single use becomes the default for
+those clients.
 
 ### 3. `iso_18045_moderate`, not `iso_18045_high`
 
@@ -206,6 +247,11 @@ Migration order: mint on both paths (nothing reads it) → switch consumers (a n
 are equal) → flip `sub` → delete the flag. Downstream, `agent_id` is what the delegation `act.sub`
 and the PDP's actor attribute carry; `sub`/`client_id` name the agent *type* and are never a
 per-instance identity.
+
+**-11 (re-read 2026-10-12):** §4's `sub` now names the client "unless specified otherwise by a profile as
+described in Section 13", and §13 lets a profile redefine `sub` if it says how the profile is recognised and what
+replaces the §7.1 and §7.5 checks. That is a conformant home for the legacy mode, but this repo's profile does not
+take it (PROFILE §6 has `sub` as the client id), and F-0062's decision stands: flip at 1.0 and drop the legacy mode.
 
 **Revisit if:** the ABCA draft ever defines its own per-instance claim — at which point `agent_id`
 should migrate to the standard name.

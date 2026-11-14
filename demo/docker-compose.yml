@@ -1,6 +1,6 @@
 # The repo's PingFederate, running locally. Built from .context/ (compose-context.sh: this repo's
-# build/pingfederate/ image build plus the config archive export.sh produced), configured by
-# .context/vars.env (rendered from vars.env by up.sh), licensed by your own DevOps credentials.
+# build/pingfederate/ image build plus the config archive up.sh authored), configured by
+# .context/vars.env (the profile's environment, rendered by up.sh through tools/profile.py), licensed by your own DevOps credentials.
 #
 #   ./up.sh                       does everything, including this
 #   docker compose up -d --build  once .context/ exists
@@ -8,7 +8,7 @@
 #
 # Ports are bound to 127.0.0.1: the archive's admin password is in .author.env and this is not a rig
 # to expose. 9031 is PF's HTTPS runtime (the issuer), 9080 an HTTP runtime listener for anything that
-# terminates TLS itself (vars.env turns it on: the image leaves it off), 9999 the admin console and API.
+# terminates TLS itself (the rig's profile turns it on: the image leaves it off), 9999 the admin console and API.
 # The healthcheck is the image's own (build/pingfederate/pf-healthcheck.sh). PF_PORT_* move the host side when another PF
 # already has them; up.sh then makes the issuer match. PF_RIG_NAME names the container and the image, so
 # a second rig - another checkout's, say - runs beside the first instead of replacing it.
@@ -34,7 +34,7 @@ services:
       # PING_IDENTITY_DEVOPS_USER / PING_IDENTITY_DEVOPS_KEY - yours, never in git. up.sh checks it exists.
       - path: ${PING_DEVOPS_CONFIG:-${HOME}/.pingidentity/config}
         required: false
-    # The image accepts no licence agreement for anyone; vars.env accepts it too, and this keeps the rig's
+    # The image accepts no licence agreement for anyone; the rig's profile accepts it too, and this keeps the rig's
     # acceptance where the compose file shows it.
     environment:
       PING_IDENTITY_ACCEPT_EULA: "YES"

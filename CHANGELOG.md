@@ -8,7 +8,703 @@ it sits under `Unreleased` with the version the poms declare (a `-SNAPSHOT`); th
 it the heading `[<version>] - <date>`, the date the tag is cut, and leaves an empty `Unreleased` for the next
 `-SNAPSHOT`.
 
-## [Unreleased] - 0.8.0-SNAPSHOT
+## [Unreleased] - 0.9.0-SNAPSHOT
+
+## [0.8.0] - 2026-11-14
+
+Phase 5 of the production programme, attestation features complete: client attestation on ABCA draft-11, with safe
+attester sources (CIMD per listed client, listed transit signing keys, wallet trust through the chain and its status
+list, SPIRE through a read-only entry reader over mutual TLS, conditional ceilings), an agent registry minting
+`agent_id`, and at the authorization server Trust Mark and key-storage minimums, single use, revocation enforced at the
+token endpoint live or through Token Status Lists, outbound CAEP, agent instances over SCIM and refresh tokens bound to
+the client instance key, and attestation events over SSF. The clustering claim is 0.7.0's (F-0601, 0.9.0). Notes, and the upgrade guide they link:
+[docs/releases/0.8.0.md](docs/releases/0.8.0.md).
+
+- New `OIDF_AGENT_REGISTRY_MODE` (`off`, the default; `memory`; `database`) turns on the attester's agent registry
+  (plan item X-A22, F-0028). With it on, every attestation carries `agent_id` (the AI Agent Profile §6(2)) or the
+  request is refused, and the CAS metadata lists `agent_id` in `attestation_claims_issued`. `database` keeps the
+  registry in PostgreSQL through `OIDF_AGENT_REGISTRY_DATA_STORE_ID` (or `OIDF_AGENT_REGISTRY_JDBC_URL`, development).
+- Agent migration V201 adds a status to each agent (`active`, `suspended`, `revoked`), its reason, time and actor, a
+  row version, and the append-only `agent_status_audit_log`. Every existing row is `active`.
+- The attester refuses a suspended or revoked agent with 403 `instance_not_authorized` before its evidence is bound,
+  and emits `attestation.issuance.agent_refused`; new counter `oidf_attester_agent_refusals_total{reason}`.
+- A registry fault at issuance is now 503 `temporarily_unavailable` (CAS §4.6), not 500 `server_error`; so is a
+  registry that should be on but did not start.
+- New operator API `/federation/attestation/agents/*`: list, look up, read the audit, suspend, reactivate and revoke,
+  on the new operator scopes `oidf.admin.agents.read` and `oidf.admin.agents`. A stale `expected_version` is 409
+  `version_conflict`; revoke is final. New event `agent.status_changed` and counter
+  `oidf_agent_status_changes_total{to}`.
+- `AgentRegistryListener` is registered in `pf-runtime.war` after `LifecycleListener`, and the start-up banner says
+  which registry ATTESTATION_ISSUER uses.
+
+- New: a deployment is described by one profile, `profiles/<name>.yaml`, validated against
+  `tools/profile/schema.json`. It names the features PingFederate runs (FAPI 2.0, client attestation and the
+  evidence types the attester checks, OpenID Federation, CIBA, Shared Signals) and the deployment's mode, and it can
+  extend another profile.
+- New presets: `minimal` (the reference stacks), `workload-agents`, `federated-agents` (the standard agentic IdP),
+  `agent-transactions` and `full`, and one `conformance-*` preset per conformance plan.
+- New: `tools/profile.py`. `render` writes the Terraform inputs, the deployment's `OIDF_*` environment and the image's
+  staging profile; `check` refuses a schema error, a combination of features that cannot work, a setting no settings
+  catalogue declares, what production refuses, a PingFederate version mismatch and a failed Terraform validation;
+  `author` applies the profile to a fresh local PingFederate and exports (and optionally age-encrypts) the config
+  archive. `--set` and `--with` lay values or another profile over a profile.
+- New: one Terraform root, `deploy/terraform/agentic-idp`, over one module per feature in `deploy/terraform/modules/`
+  (`base`, `fapi2`, `attestation`, `federation`, `ciba`, `ssf`, and the `conformance-clients` overlay). Each module
+  outputs the `OIDF_*` settings it implies, so PingFederate's configuration and the modules' settings come from one
+  source.
+- New: [docs/operator/deployment-profiles.md](docs/operator/deployment-profiles.md), the schema, the flow from
+  render to boot, what `check` refuses, and generated tables of the presets, the settings each feature implies and the
+  evidence types (`tools/profile-reference.py`; the Build workflow's lint job fails when they are not current).
+- The public tree ships `deploy/terraform/`, `profiles/`, `tools/profile.py` and `tools/profile/`.
+- Removed: `conformance/terraform/`, `conformance/vars.env` and the `conformance/vars.*.env` overlays,
+  `reference/terraform/`. The conformance rig and the reference stacks author through `tools/profile.py`.
+
+- The attester's CIMD source is rebuilt on the operator's list of clients, `OIDF_CIMD_CLIENTS`, and their trust
+  roots, `OIDF_CIMD_TRUST_BUNDLES`, and is allowed in production. Each client has one Client ID Metadata Document at
+  its client id URL, in the CAS §6.1 shape, which may list only the client's instances and their ceilings; a document
+  that carries a trust root, an issuer or a signing key is refused (CAS §6.2 rule 3, finding F-0067).
+- The CIMD fetch follows draft-ietf-oauth-client-id-metadata-document-02: the outbound rules with no exemption, 200
+  only, no redirect, at most 5 KiB by default (`OIDF_CIMD_MAX_BYTES`), a refresh every `OIDF_CIMD_REFRESH_SECONDS`
+  or sooner for a lower `max-age`, the last good document kept through a fetch failure for at most
+  `OIDF_CIMD_MAX_STALE_SECONDS`, and an invalid document dropping its client at once.
+- `OIDF_ATTESTER_CIMD_URL` builds nothing in any profile; from B02B it is a removed name.
+- The client attestation service document lists `cimd` exactly when `OIDF_CIMD_CLIENTS` lists a client, in any
+  profile.
+- The outbound address rule refuses the special-use blocks it missed: 192.88.99.0/24, 2001::/23, 100:0:0:1::/64,
+  3fff::/20 and 5f00::/16 (finding F-0610).
+- New: the audit event `attestation.issuer.cimd.document_refused`, the event `attestation.issuer.cimd.client_dropped`
+  and the metric `oidf_attester_cimd_fetches_total{outcome}`.
+
+- `OIDF_ATTESTER_CIMD_URL` and the system property `oidf.attester.cimd.url` are removed. Set, the attester refuses
+  them in every profile, naming `OIDF_CIMD_CLIENTS`, and `ATTESTATION_ISSUER` does not start; `oidf-preflight.jar`
+  reports the same line. They no longer switch `ATTESTATION_ISSUER` on by inference.
+- New: `tools/cimd-split.py` converts the old single document into one CAS §6.1 document per client and the values
+  of `OIDF_CIMD_CLIENTS` and `OIDF_CIMD_TRUST_BUNDLES`, with a `--check` mode for CI.
+- New: [docs/operator/upgrading/0.7.0-to-0.8.0.md](docs/operator/upgrading/0.7.0-to-0.8.0.md), its CIMD section.
+
+- `OIDF_ATTESTER_EXTERNAL_CEILINGS` caps what a federation or CIMD client may be granted (X-B03, F-0621): a JSON
+  object of client id to an `authorization_details` array, with `"*"` for any client it does not name. Every ceiling
+  the source declares is narrowed to its meet with the cap, so an attestation carries at most
+  instance ∩ client ∩ cap. A narrowed client is counted in `oidf_attester_external_ceiling_capped_total{source}` and
+  evented as `attestation.issuer.external.ceiling_capped`.
+- In production an external client with no cap is refused (`invalid_client`, audited
+  `attestation.issuer.client_refused` with reason `no_external_ceiling`; a CIMD document refused with rule
+  `external_ceiling`). PingFederate-store clients are never capped.
+- A federation entity can bind many instances to one client (F-0620): every `spiffe_client_bindings` entry naming a
+  `client_id` is one instance of it, and the entity's `spiffe_client_ceilings` claim sets each client's client-level
+  ceiling. Entries for one client that disagree on what the client is refuse that client only.
+
+- The attester signs only with an OpenBao transit key the operator lists in `OIDF_ATTESTER_SIGNING_KEYS`, for the
+  issuers listed with it (X-B04, F-0625). In production an unlisted key ref, or a listed one for another issuer,
+  refuses the client (`invalid_client`, audited `attestation.issuer.signing_key_refused`,
+  `oidf_attester_signing_refusals_total{rule}`).
+- Inline attester private keys are refused in production (F-0626): `OIDF_ATTESTER_SIGNING_JWK` refuses
+  `ATTESTATION_ISSUER` at the start-up audit, and `attestation_signing_jwk` refuses only its client.
+- Federation clients are signed with `OIDF_ATTESTER_SIGNING_KEY_REF`; a federation entry that names a key
+  (`signing_key_ref` or `signing_jwk`) refuses its client.
+- A rotated transit key signs, with a new `kid`, within `OIDF_ATTESTER_SIGNING_KEY_REFRESH_SECONDS` (300 s) and
+  without a restart (F-0627). Verifiers that read the attester's keys from `OIDF_FEDERATION_ATTESTER_JWKS` still need
+  a restart to see a new key, so rotate a federation-published attester with a new key name (the README's runbook).
+- The attester checks its keys at deploy and every 10 minutes: a key that does not build, or is not published in
+  `OIDF_FEDERATION_ATTESTER_JWKS`, makes the `AttesterSigningKeys` part `DEGRADED` (F-0628).
+
+- A wallet instance attestation (WIA) verifies only under the `jwks` of its provider's resolved
+  `openid_wallet_provider` metadata, after its superiors' metadata and policy; the `oauth_client_attester` and
+  Federation Entity Keys fallbacks are gone, and keys by reference are refused (F-0630).
+- A WIA needs a `typ` from `OIDF_WALLET_ATTESTATION_TYPES` (default `oauth-client-attestation+jwt`), and is refused
+  when its `nbf` or `iat` is ahead (F-0631). `typ` compares as a media type (RFC 7515 §4.1.9): `application/` is
+  implied and type and subtype are case-insensitive, so `application/oauth-client-attestation+jwt` is accepted too.
+  A `typ` or `kid` that is not a string is refused as malformed (400), not a server error.
+- A wallet client must pin its provider in `attestation_trust_domain`, and `OIDF_WALLET_PROVIDER_JWKS` is development
+  only (F-0632).
+- Each wallet instance is its own agent, keyed by its bound key; the minted workload carries `wallet_instance_jkt`
+  (F-0633).
+- `OIDF_WALLET_ATTESTATION_AUD_REQUIRED=false` accepts HAIP wallet attestations, which carry no `aud` (F-0634).
+- `oidf_attester_wallet_evidence_refusals_total{check}` counts the attester's WIA refusals.
+
+- A wallet instance attestation (WIA) that carries a `status` claim is checked against its Token Status List
+  (draft-ietf-oauth-status-list-21 §8.3) after every other check passes: INVALID is refused as revoked, SUSPENDED as
+  suspended, any other value or an index outside the list as well, each `invalid_instance_attestation` (F-0635).
+- A list that cannot be fetched or verified, with no usable cached copy, is answered 503 `temporarily_unavailable`
+  with `Retry-After: 30`.
+- `OIDF_WALLET_STATUS_REQUIRED_PROVIDERS` names the wallet providers whose WIAs must carry `status`; six more
+  `OIDF_WALLET_STATUS_*` settings cap the response, the inflated list and the cache, clamp the list's `ttl`, and set
+  the stale grace.
+- `oidf-jose` decodes Status List Tokens (`com.pingidentity.ps.oidf.jose.status`), with the draft's Appendix C test
+  vectors.
+- The `attestation.evidence.status_refused` event and the `oidf_attester_wallet_status_checks_total{outcome}` and
+  `oidf_attester_wallet_status_fetches_total{result}` metrics.
+
+- New component, `services/spire-entry-reader`: a standalone Java service beside SPIRE Server that reads registration
+  entries over the server's API socket (gRPC, Linux) and serves `GET /v1/entries?spiffe_id=` and `GET /health` as JSON
+  over mutual TLS, with client key pinning, a per-client rate limit and certificate rotation without a restart
+  (README, [configuration](docs/configuration/spire-entry-reader.md)).
+  It is read-only by construction: the write and sync stubs are not generated, an interceptor refuses any other
+  method before it is sent, and an architecture test keeps every call in one class. The attester reads it through
+  X-B08's client (`OIDF_ATTESTER_SPIRE_READER_URL`); [F-0140](docs/findings.md#f-0140) is closed.
+- An optional SPIRE authorization policy, `services/spire-entry-reader/spire`, that leaves a local caller other than
+  the SPIRE CLI only the reads: entry writes, SVID minting, join tokens and the bundle, federation and authority
+  changes are the CLI's alone through the API socket. Without it, whoever holds the socket can mint any identity in
+  the trust domain - SPIRE's default. It needs SPIRE's audit logging on and the reader in SPIRE Server's PID namespace
+  ([U-0640](docs/findings.md#u-0640)).
+- The reader's test-jar carries the JSON contract, golden fixtures and a fake reader for the PingFederate client's
+  tests ([U-0048](docs/findings.md#u-0048), [U-0049](docs/findings.md#u-0049) closed).
+
+- New image, build-only: `services/spire-entry-reader/Dockerfile` puts the reader's jar and its runtime dependencies
+  on `gcr.io/distroless/java21-debian13:nonroot` (glibc, Java 21, no shell), pinned by digest. It runs as 65532 in
+  SPIRE Server's socket group, 1000 by default (`--build-arg SPIRE_SOCKET_GID`), needs `/tmp` writable with exec, and
+  has no healthcheck: probe `/health` over mutual TLS. Build's image job builds it on every pull request, checks its
+  user and jars, scans it with the same grype gate against its base, and boots it beside SPIRE. Nothing publishes
+  it; build it from the Dockerfile (README, Running it,
+  [U-0643](docs/findings.md#u-0643)).
+- The rig gets a SPIRE overlay, `conformance/docker-compose.spire.yml`: SPIRE Server 1.15.3 with the reader's
+  reference policy, one agent, the reader and a workload. `conformance/spire/smoke.sh` brings it up, reads two
+  entries for one SPIFFE id through the reader over mutual TLS, fetches a JWT-SVID, and shows the policy refusing a
+  write from the reader's image. `SPIRE_RIG_POLICY=off` runs it without the policy.
+- `tools/ci/image-scan-gate.py` takes `--base-name` and `--grype-config`, so its report names the base and the
+  accepted-findings file of the image it gates.
+
+- The attester reads SPIRE through the SPIRE entry reader over mutual TLS (plan item X-B08, with X-B07 closing
+  F-0140). Six settings: `OIDF_ATTESTER_SPIRE_READER_URL`, `_TRUST_DOMAIN`, `_CA_FILE`, `_CLIENT_KEY_PAIR` (a
+  PingFederate SSL client key pair's alias), `_TIMEOUT_MS` and `OIDF_ATTESTER_SPIRE_FAILURE_MODE` (`closed`, the
+  default, or `downscope`).
+- The selectors every registration entry for a SPIFFE ID holds join the instance's verified selectors as `spire:*`
+  (`spire:parent_id`, `spire:k8s`, `spire:unix`, ...). They are for the attester's own policy, never signed into the
+  attestation.
+- Attestations no longer carry `workload.attributes.selectors` or `workload.attributes.spire`, in any profile.
+- `OIDF_ATTESTER_SPIRE_ENTRIES_URL` (`oidf.attester.spire.entries.url`) is removed: setting it refuses start,
+  naming `OIDF_ATTESTER_SPIRE_READER_URL`. `SpireSelectorIntrospector` and `WorkloadIntrospector` are deleted.
+- New events `attestation.spire.read` and the audited `attestation.spire.downscoped`; new counters
+  `oidf_attester_spire_reads_total{outcome}` and `oidf_attester_spire_dropped_selectors_total{type}`.
+
+- New `conditional_ceilings` rules (plan item X-B09): `{"require": {"<source>:<name>": [values]}, "ceiling":
+  [authorization_details]}`. At issuance, each rule the instance's verified selectors do not satisfy has its ceiling
+  intersected into the instance's, so missing evidence never widens a grant (CAS §7 rule 4).
+- Rules come from the new PingFederate extended property `attestation_conditional_ceilings` (client) and a
+  `conditional_ceilings` member of each `attestation_instances` entry (instance); from `OIDF_CIMD_CLIENTS` entries;
+  from a CIMD document's `oauth_client_attestation` object and its instances; and from federation
+  `spiffe_client_bindings` entries. All apply together.
+- Rules that leave nothing refuse the issuance `access_denied`. New event `attestation.issuance.ceiling_conditioned`
+  and counter `oidf_attester_conditional_ceiling_rules_total{result}`.
+- `/.well-known/client-attestation-service` advertises `conditional_ceilings_supported: true`.
+- A `CeilingPolicy` SPI is the seam the issuance servlet narrows through; it refuses (`server_error`) any answer wider
+  than the ceiling it passed in.
+
+- `attestation_asserted_context_resolver` is read off a PingFederate client (F-0230), and a client that names a
+  resolver now requires a well-formed `asserted_context` on every issuance request (F-0655).
+- An issuance request carrying `asserted_context` to a client that names no resolver is refused 400 `invalid_request`.
+- An `OIDF_ENTRA_AGENT_DIRECTORY` entry is resolved only for evidence of its `evidence_types` from its `tenant`, and
+  from its `instances` when it lists them (F-0656); a directory that cannot be used stops the issuance part at deploy.
+- An asserted ceiling that leaves no authority is refused 403 `access_denied` rather than minted empty.
+- New: the audited event `attestation.asserted_context.refused`, the metric
+  `oidf_attester_asserted_context_total{resolver,outcome}`, and the reserved extended property
+  `attestation_asserted_context_policy` (refused until package B10B gives it a meaning).
+
+- The attestation issuer reads its capabilities once, into one `IssuerCapabilities` object (plan item X-B11): the
+  challenge, the custom claims a proof must carry, the agent registry, the CIMD source, the instance attestation
+  formats and the advertised-only members. The issuance endpoint enforces from it and puts it in the servlet context.
+- `/.well-known/client-attestation-service` and `/.well-known/client-attester`'s `challenge_required` now advertise
+  what the started issuance endpoint enforces, even when the servlets were given different `challengeRequired` or
+  `customClaimsRequired` init-params. Before the issuance endpoint has started, each document reads its own settings,
+  as before.
+- The federation's `oauth_client_attester` block carries the attester's CAS §5.1 metadata (`issuer`,
+  `attestation_endpoint`, `challenge_endpoint`, `instance_attestation_formats_supported` and the rest) beside its
+  `jwks`, from the same object, with endpoints under the war's context path (F-0117). The block is still published only
+  when `OIDF_FEDERATION_ATTESTER_JWKS` is set.
+- `challengeEndpointEnabled=false` now switches the attester's challenge endpoint off: `/federation/attestation/challenge`
+  answers 404 and neither discovery document advertises `challenge_endpoint` (F-0660). Before, the switch only took
+  the member out of `/.well-known/client-attestation-service`, and the endpoint kept issuing challenges.
+
+- Build's `reference-data-tier` job installs PingFederate's jars from the image before it builds
+  `oidf-db-migrate.jar`, so it passes on a fresh runner and on Dependabot's pull requests (F-0710).
+
+- Client attestation now cites draft-ietf-oauth-attestation-based-client-auth-11 throughout: every `@Requirement`
+  id, spec quote and decision record names -11, and each quote was checked word for word against it (F-0725). The
+  challenge endpoint is `ABCA-11 §6.3` (-10's §6.1), and a test that takes a challenge from the authorization
+  server's store also pins `ABCA-11 §7.2(5)`.
+- A new check, `tools/tests/test_requirement_ids.py`, fails on an `ABCA-10` id unless a `// historical:` comment
+  above it says why.
+- The PoP `iss` check names its divergence from -11 §5.1 (claim dictionary divergence 1), and its test pins it.
+
+- A `use_attestation_challenge` refusal at the token endpoint now carries a fresh challenge in the
+  `OAuth-Client-Attestation-Challenge` header, as ABCA-11 §6.1 requires, so the client can retry without calling the
+  challenge endpoint first (F-0730).
+- Combined mode (`attest_jwt_client_auth_dpop`) refuses a missing or stale DPoP `nonce` with `use_dpop_nonce` and a
+  fresh nonce in `DPoP-Nonce` (ABCA-11 §5.2, RFC 9449 §8), where it used to answer `use_attestation_challenge` with no
+  header (F-0731). A nonce fetched from the challenge endpoint still works, and that endpoint now returns the
+  challenge in `DPoP-Nonce` as well.
+- The challenges put on refusals count against the challenge endpoint's per-caller cap
+  (`challengeRateLimitPerWindow`). Over the cap the refusal goes out without the header. A challenge store that cannot
+  record the challenge makes the refusal 503 `temporarily_unavailable`.
+- The `challenge` event catalogue gains a `via` field on `attestation.challenge.issued` and
+  `attestation.challenge.refused`: `endpoint`, or `error` for a challenge put on a refusal.
+
+- A `use_attestation_challenge` or `use_dpop_nonce` refusal from a caller past the challenge cap now carries
+  `Retry-After`, the seconds until the cap's window lets that caller get a challenge again, as the challenge
+  endpoint's own 429 does. It still carries no challenge.
+- A token request at the attestation filter while the Redis store is refused outright by its settings (a URL or
+  setting the store will not take) is now 503 `temporarily_unavailable`, as an unreachable store already was,
+  instead of 500 `server_error`. The challenge endpoint and the challenge put on a refusal answer it the same way.
+- Documented: PingFederate's own DPoP nonce requirement (`dpop_proof_require_nonce`) must be off where the
+  token-endpoint filter handles combined mode's nonce (F-0732).
+
+- A required-claim name the verifier has no semantic check for is now a presence check: the attestation must carry
+  the claim with a value other than null. Until now any such name was treated as satisfied, so a misspelled name in
+  `OIDF_ATTESTATION_REQUIRED_CLAIMS` or a client's `attestation_required_claims` switched its requirement off
+  (F-0735). `workload`, `authorization_details` and `agent_id` keep their checks (a non-empty object, a non-empty
+  array, a non-blank string). The token-endpoint filter logs each configured name and its check at start.
+- The attestation `typ` is configurable: `OIDF_ATTESTATION_ACCEPTED_TYPS` lists the values the token endpoint
+  accepts (default `oauth-client-attestation+jwt`), as draft-ietf-oauth-attestation-based-client-auth-11 §4 allows
+  for a profile, and a client's new `attestation_accepted_typs` property can narrow that list but not widen it. The
+  PoP `typ` stays fixed. A federation client keeps its `attestation_accepted_typs` when its registration is renewed
+  (F-0736).
+- A refusal of the attestation or its proof of possession now answers `invalid_client_attestation` (-11 §7.4)
+  instead of `invalid_client`: an untrusted attester, a bad signature or `typ`, a private key in `cnf`, the lifetime
+  ceiling, and every PoP or combined-mode DPoP check, the key match against `cnf` included. `invalid_client` stays
+  for a request with no attestation or no proof, a `client_id` that is not the attestation's `sub`, and a server
+  that cannot check the proof. The status is 401 either way, and the description is a fixed sentence and a
+  reference, as for every other refusal.
+
+- A client attestation without `iss`, as ABCA-11 §4 defines it, is now verified instead of refused (F-0740). The
+  attester is named by the client's bound attester when the client is bound to exactly one, else by the self-issued
+  first statement of the `trust_chain` header, else by a `kid` that only one statically trusted attester's keys
+  carry. When none applies, the attestation is refused with `invalid_client_attestation` (401).
+- The named attester is held to the same checks as one named by `iss`: the resolver establishes trust in it, the
+  signature must verify under its keys, and the client's attester binding applies.
+- An attestation that carries `iss` is handled as before. This repo's attesters keep emitting it.
+
+- The authorization server's attestation members are advertised only while `ATTESTATION_AUTH` is serving (F-0413).
+  The Entity Configuration's `openid_provider` and `oauth_authorization_server` blocks and PingFederate's two discovery
+  documents read the component's state each time they are built. With the component `FAILED_CONFIG`, `REFUSED`,
+  `FAILED_DEPENDENCY` or still starting, they carry none of the members, as they already did when it was switched off.
+- `client_attestation_pop_methods_supported` is gone from `openid_provider` (F-0412), so no document asks every
+  federation client for an attestation. The `clientAttestationPopMethodsSupported` init-param is now a removed name.
+- The token endpoint accepts the attestation, PoP and combined-mode DPoP algorithms that
+  `clientAttestationSigningAlgValuesSupported`, `clientAttestationPopSigningAlgValuesSupported` and
+  `dpopSigningAlgValuesSupported` list, the same lists the metadata advertises (plan item X-E05). The three now default
+  to every asymmetric algorithm the verifier accepted before (`ES256`, `ES384`, `ES512`, `EdDSA`, `PS256`, `PS384`,
+  `PS512`, `RS256`, `RS384`, `RS512`), and may name no other algorithm.
+- `openid_provider` carries `dpop_signing_alg_values_supported` only in combined mode, and never in place of
+  PingFederate's own.
+- `openid_provider`'s `token_endpoint_auth_methods_supported` is PingFederate's list with the ABCA-11 methods appended
+  while `ATTESTATION_AUTH` is serving, as `oauth_authorization_server`'s already was. Before, it was the configured
+  `tokenEndpointAuthMethodsSupported` in place of PingFederate's, so it hid `client_secret_basic` and the other methods
+  PingFederate accepts, and the two blocks disagreed.
+- `attestationChallengeEndpointEnabled=false` now switches the authorization server's challenge endpoint
+  (`/federation/attestation-challenge`) off as well as taking `challenge_endpoint` out of the documents: every request
+  there answers 404 and no challenge is issued, as F-0660 did for the attester. A client with
+  `attestation_challenge_required` still needs a challenge, and gets one on the token endpoint's refusal
+  (`use_attestation_challenge` with `OAuth-Client-Attestation-Challenge`, ABCA-11 §6.1, or combined mode's
+  `use_dpop_nonce`).
+- With `FEDERATION` off, a federation-entity setting refused when the token endpoint reads it at a request answers 503
+  `temporarily_unavailable`, as a part that is not serving does. Before, it was a 500 `server_error`.
+- `/.well-known/client-attester` no longer carries `token_endpoint_auth_methods_supported` (F-0411). The authorization
+  server's own list is in the document `authorization_server_metadata` names. The attester document's
+  `attestation_signing_alg_values_supported` is now the issuance servlet's `attestationSigningAlgValuesSupported`, the
+  list the CAS document carries, where before it named every asymmetric algorithm. Its `instance_proof_max_age_seconds`
+  is the proof validator's window.
+- `attestationSigningAlgValuesSupported` has no default any more. Unset, both attester documents advertise the
+  algorithms of the configured signing keys (`OIDF_ATTESTER_SIGNING_KEYS` and `OIDF_ATTESTER_SIGNING_KEY_REF`), and
+  under the production profile the attester signs with no other key. Set, it narrows that list: it is advertised as
+  written, and the attester refuses to mint with a key whose algorithm it does not list (500 `server_error`, naming the
+  setting). The issuance servlet's value now governs both discovery documents. Before the issuance servlet has started,
+  or if it never starts, neither document names a signing algorithm. Before, both advertised `RS256,PS256,ES256`
+  whatever the key signed with.
+- Federation registration, explicit and automatic, checks ABCA-11 §9's client metadata. It refuses `none` in
+  `client_attestation_signing_alg_values_supported`, and `none` or a symmetric algorithm in
+  `client_attestation_pop_signing_alg_values_supported`. It also refuses a member that is not a non-empty array of
+  strings, and a `client_attestation_pop_methods_supported` that leaves out the method the client's
+  `token_endpoint_auth_method` uses. A refused registration gets 400 `invalid_client_metadata`.
+
+- A client whose `attestation_single_use` extended property is `true`, or every client under
+  `OIDF_ATTESTATION_SINGLE_USE=true`, can authenticate only once with each attestation. A second presentation, even
+  with a fresh PoP or DPoP proof, is refused `use_fresh_attestation` (401). Both settings are off by default, so
+  reuse within the attestation's lifetime (ABCA-11 §10.2) is unchanged (F-0750).
+- The record is a SHA-256 of the attestation's decoded header, payload and signature, so a copy respelled with
+  padding, whitespace or flipped unused bits is the same attestation. It goes in the replay store the proofs' `jti`s
+  already use (Redis when configured, so it holds across nodes), kept until no node can accept the attestation. It
+  is made when the verifier accepts the attestation and its proof: a request refused after that, by the token
+  endpoint's later checks or by PingFederate, has still spent it, and the client's retry needs a fresh attestation.
+- `oidf_attestation_single_use_total{outcome}` counts `first_use`, `replay`, `store_unavailable` and `stale`.
+
+- An attester's trust chain validating can now be made not enough. `OIDF_ATTESTATION_REQUIRED_TRUST_MARKS` names
+  OpenID Federation Trust Mark types, space- or comma-separated, that every client's attester must hold. A client's
+  `attestation_required_trust_marks` extended property adds types to that list for the client; it can never remove
+  one. Once the attester's chain
+  validates, it is refused `invalid_client_attestation` (401) unless its Entity Configuration carries a valid mark of
+  each type. The mark must come from an issuer the Trust Anchor's `trust_mark_issuers` recognises for the type, and
+  be signed, about the attester and unexpired (OpenID Federation 1.0 §7, §7.3). Both lists are empty by default, and
+  then no mark is checked (F-0755).
+- The check runs on the token-endpoint filter and the OGNL criterion alike, through the same `TrustMarkValidator` that
+  federation registration uses. With `OIDF_FEDERATION_TRUST_MARK_STATUS_CHECK` on, the issuer's status endpoint is
+  asked too.
+- A required mark left unchecked, because the resolution budget ran out or because the issuer's chain, the Trust
+  Anchor's configuration or the issuer's status endpoint could not be fetched, is answered 503
+  `temporarily_unavailable`, as an unreachable trust chain is. It is never remembered.
+- An attester trusted through `oidf.mock.attesters` holds no Trust Marks, so any requirement refuses it: the check
+  fails closed.
+- A verdict that lets an attester through is reused until the earliest of the marks' `exp`, the chain's expiry and
+  `OIDF_ATTESTATION_TRUST_MARK_CACHE_MAX_SECONDS` (3600 seconds by default, 0 to 86400). A refusal is never reused.
+- A refusal emits `attestation.attester.trust_marks_refused`, naming the attester, the anchor and the missing types,
+  with reason `missing` or `unchecked`.
+- `oidf_attestation_attester_trust_marks_total{outcome}` counts `satisfied`, `cached`, `missing` and `unchecked`.
+- A client policy that requires Trust Marks has a different policy fingerprint. A policy without them keeps the one it
+  had.
+
+- The token-endpoint filter and the OGNL criterion now read an attestation's `key_storage` and `user_authentication`
+  (OpenID4VCI 1.0 Appendix D). A client's `attestation_min_key_storage` and `attestation_min_user_authentication`
+  extended properties, or the server-wide `OIDF_ATTESTATION_MIN_KEY_STORAGE` and
+  `OIDF_ATTESTATION_MIN_USER_AUTHENTICATION`, set the lowest level accepted, compared on ISO/IEC 18045's order:
+  `iso_18045_basic` < `iso_18045_enhanced-basic` < `iso_18045_moderate` < `iso_18045_high`. An attestation below
+  the minimum, without the claim, or asserting a value outside the four is refused `invalid_client_attestation`
+  (401). All four settings are unset by default, which checks nothing (F-0760).
+- A client's minimum can only be the same as or higher than the server's; a lower one, or a value that is not one of
+  the four spelt exactly, refuses the client (401 `invalid_client`, `attestation.policy.invalid`).
+- Each refusal emits `attestation.level.refused` (catalogue `assurance`) and counts in
+  `oidf_attestation_min_level_refused_total{claim, reason}`, the reason `below_minimum`, `unrecognised` or `missing`.
+- The RAR plugin passes the attested levels to the PDP: `att_key_storage` and `att_user_authentication` in the
+  governance-engine request, `context.attestation.key_storage` and `context.attestation.user_authentication` in the
+  AuthZEN request. A policy can now require a level per `authorization_details` type. Both governance-engine names
+  are reserved, so a requested field carrying either is denied (F-0073).
+- `libs/client-attestation` now depends on `libs/device-instance` for the level vocabulary (`KeyStorageLevel`). Both
+  jars were already staged into PingFederate.
+
+- The conformance rig has a `fapi2-attestation` profile (`PF_PROFILE=fapi2-attestation`). It adds two FAPI 2.0
+  clients that the OpenID conformance suite authenticates by `attest_jwt_client_auth`, with the suite as their
+  attester. They are for the `client_attestation` variant of the FAPI 2.0 Security Profile Final plan. No suite release
+  offers that variant with the `plain_fapi` profile, so the rig runs the pinned release with a local patch, drafted as
+  a merge request for the suite but not yet submitted. See [the rig's README](demo/README.md#the-fapi-20-plan-with-client_attestation).
+- `conformance/gen-keys.sh` writes the suite's attester key (EC P-256 with a certificate in `x5c`), two bridge keys,
+  and the two files the profile's PingFederate reads.
+- `licensed.yml` runs the plan weekly as the `fapi2-attestation` entry. It first builds the patched suite on the
+  runner (`tools/ci/build-patched-suite.sh`).
+- `conformance/suite/run-plan.py --pause SECONDS` waits between modules. PingFederate's attestation challenge endpoint
+  limits each caller to 60 challenges a minute, and the plan exceeds that when its modules run back to back.
+
+- PingFederate's token-endpoint filter reads the device-instance and agent registers at every attested request (plan
+  item X-E11, F-0770): an attestation whose `agent_id` a register holds suspended or revoked is refused 401
+  `invalid_client` though it is unexpired (the attestation is valid; the client's standing is not, as with a hosted
+  agent's standing), at the token endpoint (every grant, refresh included), PAR, CIBA's backchannel endpoint, device
+  authorization and introspection. The revocation endpoint is left open, so a revoked agent can still revoke its own
+  tokens. New event `attestation.client.status_refused` and counter `oidf_client_revocation_checks_total{status,decision}`.
+- The OGNL issuance criterion runs the same check for a request the filter did not verify (a deployment without the
+  filter). It runs in PingFederate's engine copy of the jars, which cannot read the registers, so there a check that
+  applies refuses every attested token. The first such call logs one line naming `OIDF_CLIENT_REVOCATION_MODE` and the
+  filter: ERROR under production, WARN under development.
+- New settings: `OIDF_CLIENT_REVOCATION_MODE` (`off` or `live`, and `status_list` or `both` from X-E12; unset is `live` once a register is
+  configured),
+  `OIDF_CLIENT_REVOCATION_CACHE_SECONDS` (0 by default, at most 300) and `OIDF_CLIENT_REVOCATION_FAIL_OPEN`
+  (development only). A register that cannot be read, or is configured and has not started, is 503
+  `temporarily_unavailable`. `OIDF_CLIENT_REVOCATION_MODE=live` or `both` with no register configured is refused under production
+  (the filter does not start, naming the setting) and a WARN under development.
+- New settings `OIDF_INSTANCE_REGISTRY_TIMEOUT_MS` and `OIDF_AGENT_REGISTRY_TIMEOUT_MS` (2000 by default, 100 to 10000):
+  each register database operation's budget, so a slow database answers 503 after two seconds instead of holding the
+  token request for the platform's ten.
+- `OIDF_CLIENT_REVOCATION_MODE=off` needs the new accepted risk `client-revocation-off` under production: without it
+  ATTESTATION_AUTH is refused, naming the risk. Unset is not `off`, so a default deployment needs nothing.
+- A register answers only for its own client's instances: an agent minted for another client, or a device instance
+  another agent platform enrolled (the attestation's `iss`), is not registered for the client presenting it, so it
+  cannot satisfy that client's `attestation_revocation_mode=live`. An active answer is remembered per client and attester.
+- New client extended property `attestation_revocation_mode` (`live`; `status_list` and `both` from X-E12): the check runs for that client whatever the server
+  says, and an `agent_id` no register knows, or an attestation without one, is refused too.
+- PingFederate can now read the device-instance registry (the Identity Object Model) through
+  `OIDF_INSTANCE_REGISTRY_DATA_STORE_ID` (or `OIDF_INSTANCE_REGISTRY_JDBC_URL`, development). `InstanceRegistryListener`
+  is registered in `pf-runtime.war` after `AgentRegistryListener`, as a part of ATTESTATION_AUTH, and the start-up
+  banner says which store it uses.
+- New operator API `/federation/attestation/instances/*` (F-0771): list a device's instances, read one, read its ledger,
+  and suspend, reactivate or revoke it, on the new operator scopes `oidf.admin.instances.read` and
+  `oidf.admin.instances`. A stale `expected_status`, or a change that lost a race, is 409 `status_conflict`; revoke is
+  final. New event `instance.status_changed` and counter `oidf_instance_status_changes_total{to}`.
+
+- Device instances and workload agents can now be checked through a Token Status List
+  (`draft-ietf-oauth-status-list-21`), as well as by reading the registers live (X-E11). This lets a verifier that
+  cannot reach the registers' databases see a suspension or revocation before the attestation expires. Plan item
+  X-E12, F-0775.
+- **Every instance gets an index.** Each workload agent and device instance is given its list index (`status_idx`)
+  when it is registered or enrolled:
+  - the index is random in [0, 2^20), unique in its register, never changed and never reused;
+  - it is random because sequential indexes would leak enrolment order, and the draft names random indices as the
+    mitigation for tracking (§12.4, §12.5.1);
+  - workload agents keep it in `agent_identity.status_idx` (new migration V202, which backfills every existing agent);
+  - device instances keep it in the Identity Object Model entry's `attrs.statusIdx`, because the model's schema
+    belongs to idp-scim-service. An instance enrolled before this release is given one the first time it is attested.
+- **The attester publishes a list.** With `OIDF_ATTESTER_STATUS_LIST_URL` set, the attester serves one Status List
+  Token per attester issuer at `/federation/attestation/status/{list}`:
+  - `typ` is `statuslist+jwt`, `iss` is the issuer, and `sub` is the list's URL;
+  - each status takes 2 bits: VALID, INVALID for revoked, SUSPENDED;
+  - the list is signed under the X-B04 signing key rules with `OIDF_ATTESTER_SIGNING_KEY_REF` (under development only,
+    the inline `OIDF_ATTESTER_SIGNING_JWK`);
+  - `ttl` and `exp` come from `OIDF_ATTESTER_STATUS_LIST_TTL` (300 s by default), and `Cache-Control: max-age` is
+    what is left of them;
+  - it needs `OIDF_AGENT_REGISTRY_MODE` set to `database` (or `memory`, in development).
+- **The enrolment service publishes a list.** With `ENROLMENT_STATUS_LIST_URL` set, the device-enrolment service serves
+  its device instances' list at that URL's path. It is signed with `ENROLMENT_SIGNING_JWK`, and its TTL comes from
+  `ENROLMENT_STATUS_LIST_TTL`.
+- **The list is read from the register, not stored twice.** Each entry is the register's own status, read from
+  PostgreSQL when the list is rendered, so every node in a cluster serves the same list. A node holds a rendering for
+  at most 5 seconds, and renders each list once however many requests arrive together. The status-change hook (X-E13) drops it at once on the node that made the change. A change made
+  anywhere else, such as PingFederate's instance admin API against the enrolment service's list, shows up within those
+  5 seconds.
+- **Attestations carry their entry.** With a list on, both minters add
+  `status: {"status_list": {"idx": ..., "uri": ...}}`. The ABCA draft allows claims it does not define.
+- **New verifier modes.** `OIDF_CLIENT_REVOCATION_MODE` takes two new values, `status_list` and `both`, and so does a
+  client's `attestation_revocation_mode`. Each can only tighten the server's mode. In these modes the token endpoint
+  reads the attestation's `status` claim:
+  - it fetches and caches the list through the B06 status list client, under the new `OIDF_CLIENT_REVOCATION_STATUS_*`
+    limits, and verifies it with the keys the attestation was verified with;
+  - an entry that is INVALID, SUSPENDED or another value, an index outside the list, or an attestation without the
+    claim is refused 401 `invalid_client`, the same as the register check;
+  - a list that cannot be fetched or verified is refused 503 `temporarily_unavailable`. Development's
+    `OIDF_CLIENT_REVOCATION_FAIL_OPEN` lets these through;
+  - the OGNL issuance criterion runs the same check. It can, because the list is fetched over HTTP.
+- New events: `attestation.client.status_list_refused`, `attestation.status_list.entry_changed` and
+  `attestation.status_list.unavailable`.
+- New counters: `oidf_client_revocation_status_list_checks_total`, `oidf_client_revocation_status_fetches_total`,
+  `oidf_attester_status_list_requests_total` and `oidf_attester_status_list_changes_total`.
+
+- New setting `OIDF_CLIENT_REVOCATION_CAEP` (default `false`, strictly `true` or `false`; plan item X-E13, F-0780).
+  When it is on, a device instance (Identity Object Model) or workload agent (`agent_identity`) that changes status
+  raises a SET through the SSF transmitter to every stream that hears it:
+  - revoked: CAEP `session-revoked`, with `initiating_entity` (`admin` for an operator or SCIM, `policy` for a change an
+    inbound signal caused, `system` otherwise) and a fixed `reason_admin`. The operator's own reason stays in the
+    register's audit row and is not sent;
+  - suspended: RISC `account-disabled`, which RISC 1.0 §2.3 defines as reversible ("The account may be enabled
+    (Section 2.4) in the future"), so a receiver does not treat a suspension as final;
+  - reactivated (suspended to active): RISC `account-enabled`.
+
+  The subject is `{"format": "opaque", "id": "<agent_id>"}`. A stream hears it when that subject was added to it, or
+  when the transmitter's `default_subjects` is `ALL`.
+- The status changes come from the registers, not from PingFederate's audit log: every path that changes a status
+  reports it. That covers the operator APIs (`/federation/attestation/instances/*`, `/federation/attestation/agents/*`),
+  SCIM (`/federation/scim/v2`, X-E14), and inbound CAEP. A register reports a change once, after it is committed, and only when the
+  status really moved. A retried revoke or a lost race reports nothing.
+- Loop guard: a change that an inbound SET caused is not sent to a stream whose audience is that SET's issuer. It still
+  goes to every other stream. A longer cycle ends by itself, because a node that already has the change makes no move
+  and reports nothing. The guard assumes a peer's receiver audience equals its issuer (see Before you deploy).
+- This platform's own receiver (`OIDF_SSF_RECEIVER_INSTANCE_REGISTRY=true`) now acts on these SETs:
+  - an `opaque` subject that is an instance's `agent_id` is acted on as that instance: `session-revoked` revokes it,
+    and RISC `account-disabled` suspends it if it is active;
+  - an `opaque` subject that is a device id still acts on every instance on that device, as before;
+  - `account-enabled` is not acted on, because resuming an instance is an explicit act.
+- New events `ssf.client_status.set_emitted` and `ssf.client_status.set_suppressed`. The suppressed event carries one
+  of four reasons: `loop_guard`, `no_stream`, `not_started` or `failed`. New counter
+  `oidf_ssf_client_status_sets_total{register,to_status,outcome}`.
+- F-0773 is fixed. With `OIDF_CLIENT_REVOCATION_CACHE_SECONDS` above 0, the node that takes a suspension or revocation
+  now forgets that agent's remembered active answer at once, so its next request on that node is refused. The
+  token-endpoint filter listens on the same hook. Other nodes can still be up to the configured seconds late.
+- For extension authors: the hook is `com.pingidentity.ps.oidf.platform.status.ClientStatusChangeListener` in
+  `libs/platform`. Register a listener with `ClientStatusChanges.register(listener)`, which returns a closeable
+  registration. `IomInstanceRegistry`, `InMemoryInstanceRegistry`, `JdbcAgentRegistry` and `InMemoryAgentRegistry` tell
+  the hub by default, or take a listener in their constructors. `InstanceRegistry.revoke`, `setStatus` and
+  `changeStatus`, and `AgentRegistry.changeStatus`, have overloads that take a `ClientStatusChange.Source`.
+
+- New SCIM 2.0 endpoint at the attester, `/federation/scim/v2` (plan item X-E14, F-0785), off unless
+  `OIDF_SCIM_AGENT_INSTANCES=true`. It serves device instances (Identity Object Model) and workload agents
+  (`agent_identity`) as one resource type, `AgentInstance`, with schema
+  `urn:idpartners:params:scim:schemas:core:1.0:AgentInstance` ([agent-instance.md](docs/scim/agent-instance.md)):
+  - `GET /AgentInstances/{agent_id}`, and `GET /AgentInstances?filter=` with `eq` comparisons joined by `and`. A filter
+    must name an `id`, an `owner.value` (a device owner's PingOne subject, or a workload agent's `client_id`) or a
+    `device.value`; otherwise the answer is 400 `tooMany`;
+  - `PATCH /AgentInstances/{agent_id}` of `status`, `active` and `status_reason`. A change goes through the register's
+    own guarded update and audit row, the same path the operator APIs use, and reaches the status-change hook with source
+    `scim`, so `OIDF_CLIENT_REVOCATION_CAEP` sends it on. Revoked is terminal (400 `invalidValue`), `If-Match` is
+    honoured (412), and a change that lost a race without `If-Match` is 409;
+  - `/Schemas`, `/ResourceTypes` and `/ServiceProviderConfig`.
+- New operator scopes `oidf.admin.scim.read` (reads and discovery) and `oidf.admin.scim` (PATCH), on PingFederate-issued
+  operator tokens as for the other operator APIs. Errors, including the token check's refusals, are in the SCIM error
+  schema.
+- New events `agent_instance.scim_status_changed` and `agent_instance.scim_status_refused` (reasons `terminal`,
+  `precondition_failed`, `conflict`), and counter `oidf_scim_agent_instance_changes_total{register,to_status,outcome}`.
+- The schema definition and a set of SCIM vectors that any implementation must answer the same way are published as
+  `docs/scim/agent-instance.schema.json` and `docs/scim/agent-instance-vectors.json`.
+
+- The token-endpoint filter now binds each refresh token PingFederate issues to an attested client to the client
+  instance key that asked for it (plan item X-E15, F-0767). It records the SHA-256 of the token against the RFC 7638
+  thumbprint of the attestation's `cnf` key, the client and the grant's expiry. A refresh with that token must then be
+  authenticated by an attestation with the same `cnf` key. Another instance of the same client, with an attestation of
+  its own, is refused 400 `invalid_grant`, and so is the bound token presented without an attestation. This is
+  draft-ietf-oauth-attestation-based-client-auth-11 §10.3: "the refresh token MUST be bound to the Client Instance Key,
+  and the Client Instance MUST use the same key that was present in the cnf claim of the Client Attestation that was
+  used when the refresh token was issued." Before this, PingFederate answered such a refresh with new tokens.
+- With refresh-token rotation, the new token is bound to the same key. The token it replaces keeps its binding, because
+  PingFederate's rolling grace period keeps it redeemable (F-0790). New setting
+  `OIDF_ATTESTATION_REFRESH_BINDING_GRACE_SECONDS` can shorten that; unset, it lasts as long as the grant. In combined
+  (DPoP) mode the bound key is the DPoP proof's key, which the verifier already holds to the `cnf` key.
+- Bindings live in the attestation store, beside the replay cache and the challenges: Redis when `OIDF_REDIS_URL` is
+  set (keys `oidf:as:refresh:<sha256>`, expiring with the grant), otherwise this node's memory. The token is never
+  stored or logged, and its digest is never logged.
+- A refresh token with no binding (issued before this release, or to a request without an attestation) is let through,
+  with the event `attestation.refresh.unbound`, and counted.
+- New setting `OIDF_ATTESTATION_REFRESH_BINDING`: `off`, `on` (the default) or `strict`. `strict` also refuses a refresh
+  token with no binding. `off` needs the new accepted risk `refresh-binding-off` under production.
+- New setting `OIDF_ATTESTATION_REFRESH_BINDING_TTL_SECONDS` (365 days by default, 3600 to 315360000): how long a
+  binding is kept when PingFederate reports no expiry for the grant.
+- New client extended property `attestation_refresh_binding` (`on` or `strict`). It can only tighten the server's
+  setting; `off` is refused as loosening it.
+- A binding store that cannot be read refuses the refresh 503 `temporarily_unavailable`. A token whose binding cannot
+  be written is never sent: its grant is revoked and the client is answered 503. The in-memory store holds at most
+  65536 unexpired bindings and never evicts one to make room (an evicted binding would let any key redeem its token
+  under `on`); when it is full, a new token is withheld the same way (F-0791). A 2xx token response with a
+  `Content-Encoding` cannot be read for its refresh token and is answered 500 (F-0792); PingFederate 13.1.3 compresses
+  none.
+- New event `attestation.refresh.refused` (reason `mismatched`, `unattested_refused` or `unknown_refused`, with the
+  bound and presented key thumbprints) and counter `oidf_attestation_refresh_binding_total{action,outcome}`.
+
+- PingFederate refuses a hosted agent this deployment has suspended or revoked at its token and PAR endpoints at once
+  (401 `invalid_client`), instead of issuing it tokens until its automatic registration expires (up to
+  `OIDF_REGISTRATION_MAX_TTL_SECONDS`, 24 h by default), whatever `OIDF_AUTO_REGISTRATION_FAIL_CLOSED` says. The check
+  reads the authority's registry, which every node shares on the database store; when it cannot be read, or HOSTING is
+  configured but its registry is not published yet, the request is refused 503 (F-0679). A CIBA or device
+  authorization request is checked only at its token poll.
+
+- `tools/profile.py` (`check`, `render` and `author`) now refuses a profile that turns on PingFederate's DPoP nonce
+  requirement (`features.fapi2.dpop_require_nonce: true`) while the attestation token-endpoint filter is on
+  (`features.attestation` with `auth`, which defaults to true). The two issue different nonces, each refused by the
+  other, so a generic RFC 9449 client looped and never got a token (F-0732). The error names both settings and says
+  to turn PingFederate's off, since the filter issues the nonce.
+
+- A Trust Mark another issuer signed with a key it has since retired can be checked with that key from the issuer's
+  historical keys endpoint (OpenID Federation 1.0 §8.7), with `OIDF_FEDERATION_HISTORICAL_KEYS_CONSUME=true` - off by
+  default. Only a key that was valid when the mark was signed verifies it, never one revoked as compromised or for a
+  reason §8.7.3 does not define, and never a mark without `exp`. An issuer's answer is kept for
+  `OIDF_FEDERATION_HISTORICAL_KEYS_CACHE_SECONDS` (F-0670).
+- `OIDF_PDP_DECISION_POINTS` takes seven more names, each asked only when listed: `hosted_entity_suspend` and
+  `hosted_entity_revoke` (recorded only - a denial or no decision never stops either), `hosted_entity_reactivate`,
+  `hosted_entity_rekey` and `trust_mark_grant` (a denial is 403), `trust_mark_issue` (a denial is 404, as for no
+  grant) and `resolve` (a denial is §8.9 `invalid_subject`, 404). Every answer counts in
+  `oidf_federation_pdp_decisions_total` (F-0671).
+- Two client extended properties tighten the PDP for one client: `federation_pdp_token_issuance=true` asks about its
+  tokens although `token_issuance` is not listed, and `federation_pdp_fail_open=false` makes it fail closed when the
+  deployment fails open (F-0672).
+- A federation client's renewal keeps every extended property an operator set by hand - the per-client PDP, attestation
+  and chain-age rows - instead of rebuilding them all from the relying party's metadata (F-0673).
+
+- A self-signed hosted agent can be enrolled, publish its configuration and resolve when the authority keeps its agents
+  in a database. Before, the database registry refused it and the enrolment answered 500 (F-0675). The federation
+  migration `V107` adds the agent's own keys and its published configuration to `hosted_entity`. A configuration whose
+  `iat` is not later than the one already published is refused 409 `invalid_entity_configuration`, so an older signed
+  copy cannot be published again to bring back what the agent replaced.
+- An operator can re-key a self-signed agent: `POST /federation/admin/entities/rotate-key` with `federation_jwks`, public
+  keys only. The answer's `publish_again` says whether the agent must publish its configuration again under the new
+  key; a configuration the new keys do not sign is cleared. A `hosting_key_ref` is refused for a self-signed agent, and
+  `federation_jwks` for an authority-signed one (F-0676).
+- The resolve endpoint drops the responses it kept about a hosted agent when this node suspends, revokes, re-keys or
+  publishes it, or changes its Trust Marks, and does not keep a resolution that ran across such a change. Before, a
+  suspended, revoked or re-keyed agent kept resolving from what was kept, for up to a minute. Another node in a cluster
+  still can, for up to `OIDF_FEDERATION_RESOLUTION_RESOLVE_CACHE_SECONDS` (F-0678).
+- `HostingMode` and the federation library's README say what `SELF_SIGNED` does, no longer "not yet implemented"
+  (F-0677).
+- `services/harness` has `FederationSmokeHarness`: a self-signed agent enrolled, published, fetched, resolved,
+  suspended, reactivated, re-keyed and revoked, in process (`selfverify`) or against a running PingFederate (`live`).
+- `conformance/suite/run-plan.py --save-logs DIR` keeps every module's full log, and `tools/suite-log-ids.py` compares
+  the requirement ids the suite logged with the sections our tests pin. The licensed conformance jobs keep the logs,
+  scrubbed by `licensed-scrub.py --tokens` of JWS signatures, credential members and form parameters, private JWK
+  members, PEM private keys and scheme credentials; a file with any left is not kept.
+
+- Record the 9 October code review: the confirmed findings, the PRs that fix them, and the open question of whether upstream advisories apply to the Jackson and Log4j that PingFederate provides (U-0604), accepted until a PingFederate image carries the fixed releases.
+
+- Remove demo PDP, audience and issuer values from the shipped GM WAR descriptor.
+
+- An iOS enrolment's ID token must carry `nonce` = `base64url(SHA-256(challenge "|" instance-jkt))`, the value
+  AgentIdentityKit already sends; a token with no nonce, or one computed for another challenge or instance key, is
+  `user_authentication_failed` and nothing is registered. The connector path's three-segment nonce is unchanged
+  (F-0084, issue #189).
+- A first enrolment, on the iOS and the connector path, is refused with `user_verification_required` when the ID
+  token's `auth_time` is older than `UV_MAX_AGE_SECONDS`, the same window renewal enforces, before any device,
+  federation entity or attestation is created (F-0723, issue #188).
+
+- Refuse cnf-bearing access tokens at the bearer-only Grant Management and MCP endpoints.
+
+- Cap enrolment, GM, SSF and federation request bodies at 1 MiB. Enforce exact enrolment paths and methods. Bound and shut down enrolment workers.
+
+- `pf.plugins.pf-rar-paz-plugin.jar` shades and relocates Jackson 2.21.7 (jackson-core, jackson-databind) instead of
+  2.21.1, picking up the upstream fixes released since 2.21.1. PingFederate's own Jackson, which every other module
+  uses, is unchanged (#164).
+
+- A client's `attestation_bundle_url` that cannot be re-fetched is served from the cache only until the set last
+  fetched successfully is 600 s old (twice the 300 s cache TTL). Past that the client's issuance is a `server_error`
+  until a fetch succeeds again, so an outage of the bundle URL can no longer keep a withdrawn or compromised key
+  verifying instance evidence for the life of the JVM. The first stale lookup of a URL logs a WARN and the first
+  refusal an ERROR, and each is counted in `oidf_attester_bundle_stale_total{outcome}` (F-0720).
+
+- device-enrolment fetches PingOne's JWKS for an unknown `kid` at most once every 30 s, one fetch at a time, and
+  backs off a failed fetch from 5 s, doubling to 5 minutes. Before, every token naming an unknown `kid` on the
+  unauthenticated `/enrol` and `/user-verification` made one outbound request to PingOne (F-0721, issue #186).
+- PingOne ID tokens, SPIFFE JWT-SVIDs, instance key proofs, OpenID Federation endpoint
+  client assertions, explicit-registration request objects and RPs' signed JWK Sets are refused before their `nbf`,
+  allowing the same clock skew as `exp`, and refused when `nbf` is present but not a number (RFC 7519 §4.1.5;
+  F-0722, issue #187).
+
+- Require typ, iat and exp on enrolment key proofs and retain replay keys for the whole acceptance window.
+
+- The instance-registry datasource plugin checks the Identity Object Model's ledger (`idm.schema_migration`) for
+  `0000-base-schema`, `002-backfill-may-attrs` and `006-add-agent-instance-registry` on its first lookup that reaches
+  the database. A missing migration answers every lookup with the refusal, logged once at ERROR, until the ledger
+  records it; no reconfigure is needed after that. device-enrolment makes the same check at start-up and stops with
+  exit status 1 naming what is missing; a database it cannot read is tried three times, two seconds apart
+  ([database-migrations.md](docs/operator/database-migrations.md#the-start-up-check)) (F-0510, closed).
+- The ledger's refusal now says, for each missing model migration, whether a read-only probe found its effect already
+  in the database (record it) or not (apply it) (F-0511, accepted until 2027-03-31).
+- The SSF receiver applies a `device-compliance-change` as an observation at its `event_timestamp` and ignores one
+  older than the posture the device records: a late or retried `compliant` no longer undoes a newer `not-compliant`,
+  and a stale `not-compliant` suspends nothing. Counted in `oidf_ssf_receiver_stale_events_total{event_type}`, with the
+  event `ssf.receiver.stale_event`. The new setting `OIDF_SSF_RECEIVER_MAX_FUTURE_SKEW` (300 s, 0-3600) bounds how far
+  ahead of the node's clock an `event_timestamp` may be (servlets/ssf/README.md)
+  (F-0551, closed). A timestamp within that skew but later than the SET's receipt is taken as the receipt, so a SET
+  stamped ahead cannot mask the real changes that follow it; a SET with no usable `event_timestamp` is observed at the
+  time the receiver's inbox took it in, the same on every retry, never at the time a worker acts on it.
+- Every SSF store queues a SET only under its stream's lock and refuses one for a disabled stream: a disable never
+  leaves a SET queued behind its purge, and a stream-updated SET queued on an empty queue always goes before what
+  follows it (F-0556, F-0558, closed; U-0680).
+- On the `ldm` store a stream's `createdAt` and `updatedAt` are documented as the database's write times, and a test
+  keeps anything from reading them (F-0150, closed). The `ldm` store stays single-node through 1.0.0
+  (F-0387, F-0535, F-0550, F-0555, F-0560, accepted until 2027-06-30, retargeted to 1.1.0).
+
+- The SSF transmitter can now tell a receiver when a workload agent is registered, which happens when the agent's
+  first attestation mints its `agent_id`. The SET is
+  `urn:idpartners:params:secevent:attestation:1.0:instance-registered`, about the opaque `agent_id`, and carries
+  `event_timestamp`, `register` and `client_id`. A stream gets it only by requesting it, and only with
+  `OIDF_SSF_DEFAULT_SUBJECTS=ALL` (#334).
+
+- The SSF transmitter now sends the instance-registered SET for device instances too. The enrolment service registers
+  them in its own process, so PingFederate follows the instance registry's ledger every 15 seconds and sends one SET per
+  registration, with `register` `device_instance`, to the streams that request
+  `urn:idpartners:params:secevent:attestation:1.0:instance-registered`. It needs the instance registry configured in
+  PingFederate (`OIDF_INSTANCE_REGISTRY_*`) and `OIDF_SSF_DEFAULT_SUBJECTS=ALL` (#340).
+
+- The SSF transmitter can now tell a receiver each time the attester issues a client attestation to a workload agent.
+  The SET is `urn:idpartners:params:secevent:attestation:1.0:attestation-issued`, about the opaque `agent_id`, and
+  carries `event_timestamp`, `renewal`, `attestation_expires_at`, `evidence_type` and `client_id`, never the evidence. A
+  stream gets it only by requesting it; it needs the agent registry on and, in practice, `OIDF_SSF_DEFAULT_SUBJECTS=ALL`
+  (#335).
+
+- The SSF transmitter can now tell a receiver when the attester's signing key rotates in OpenBao. The SET is
+  `urn:idpartners:params:secevent:attestation:1.0:attester-key-rotated`, about the transit key's name (`opaque`), and
+  carries `event_timestamp`, the new `kid`, `previous_kid` and, when `OIDF_ATTESTER_SIGNING_KEYS` binds the key, its
+  `issuers`. It follows the rotation within one `OIDF_ATTESTER_SIGNING_KEY_REFRESH_SECONDS`, once across a cluster on
+  the tables store. A stream gets it only by requesting it (#337).
+
+- The SSF transmitter can now tell a SOC when the attester refuses an attestation request with a 4xx. The SET is
+  `urn:idpartners:params:secevent:attestation:1.0:attestation-refused`, with a `reason` from a fixed list of ten
+  categories and, once the evidence matched a client, `client_id` and `evidence_type`; never the refusal's message, the
+  evidence, the proof, a token or a key. Its subject is `iss_sub` (the attester and the client), or `ip-addresses` (the
+  caller) for a request refused before its evidence matched a client (#336).
+- New setting `OIDF_SSF_REFUSAL_RECEIVERS`: the client ids whose streams may hear refusals. Any other stream that requests
+  the event has it left out of `events_delivered` and is sent none. Unset, the default, no stream hears refusals.
+
+- Each attestation event family can be switched off: `OIDF_SSF_INSTANCE_REGISTERED_EVENT_ENABLED`,
+  `OIDF_SSF_ATTESTATION_ISSUED_EVENT_ENABLED`, `OIDF_SSF_ATTESTATION_REFUSED_EVENT_ENABLED` and
+  `OIDF_SSF_ATTESTER_KEY_ROTATED_EVENT_ENABLED`, all `true` by default. A family switched off is raised by nothing, sent
+  to no stream and left out of `events_supported` and `all_events_supported`. A deployment profile sets them under
+  `features.ssf.attestation_events` (#338).
+
+- `conformance/verify-attestation-events.sh` boots the rig with the attester's transit key, the agent registry and the
+  SSF tables store on a throwaway PostgreSQL. As a receiver flagged for refusals, it shows each attestation event
+  arriving once per trigger, with its signature verified: instance-registered, attestation-issued (first, then a
+  renewal), attestation-refused and attester-key-rotated (#339).
+
+- The `spire-entry-reader` image now ships guava 33.7.2, past GHSA-xxph-c9ww-hj94 (High). grpc-java 1.84.2 brings
+  33.6.0, so the BOM pins guava until a grpc release depends on a fixed version.
 
 ## [0.7.0] - 2026-10-11
 

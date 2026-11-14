@@ -1,0 +1,16 @@
+{
+  "client_id": "https://host.docker.internal:57443/agents/payments",
+  "client_name": "Rig payments agents",
+  "token_endpoint_auth_method": "private_key_jwt",
+  "oauth_client_attestation": {
+    "attester": "https://localhost:9031",
+    "issued_ttl": 300,
+    "entitlement": [{"type": "sales_agent", "sales_regions": ["EMEA", "APAC"]}],
+    "instances": [
+      {"subject": "spiffe://rig.example/payments/eu",
+       "entitlement": [{"type": "sales_agent", "sales_regions": ["EMEA"]}],
+       "metadata": {"region": "EMEA"}},
+      {"spiffe_id": "spiffe://rig.example/payments/ap"}
+    ]
+  }
+}

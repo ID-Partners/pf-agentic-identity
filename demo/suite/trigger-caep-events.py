@@ -41,17 +41,15 @@ EVENTS = [
 
 
 def base_url():
-    for line in open(os.path.join(RIG, "terraform", "variables.tf")):
-        if line.strip().startswith('default     = "https:'):
-            return line.split('"')[1]
-    sys.exit("could not read pf_base_url from terraform/variables.tf")
+    """The rig's issuer as up.sh defaults it: PF_BASE_URL, else https://localhost:$PF_PORT_HTTPS (9031)."""
+    return os.environ.get("PF_BASE_URL") or f"https://localhost:{os.environ.get('PF_PORT_HTTPS', '9031')}"
 
 
 def secret():
     for line in open(os.path.join(RIG, "secrets.env")):
         if line.startswith("TF_VAR_ssf_emitter_client_secret="):
             return line.strip().split("=", 1)[1]
-    sys.exit("no TF_VAR_ssf_emitter_client_secret in secrets.env - run ./gen-keys.sh, then re-apply and re-export")
+    sys.exit("no TF_VAR_ssf_emitter_client_secret in secrets.env - run ./up.sh, which generates it and authors the archive with it")
 
 
 def post(url, body, headers):
@@ -65,7 +63,7 @@ def post(url, body, headers):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--base", default=None, help="the rig's origin (default: terraform's pf_base_url)")
+    ap.add_argument("--base", default=None, help="the rig's origin (default: PF_BASE_URL, else https://localhost:$PF_PORT_HTTPS)")
     ap.add_argument("--subject", default="example.user@example.com", help="email of the subject the events are about")
     ap.add_argument("--stream-id", default=None, help="raise to this stream only (default: every subscribing stream)")
     args = ap.parse_args()

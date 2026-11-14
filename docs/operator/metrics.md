@@ -172,6 +172,13 @@ catalogues and the code to each other.
 | `oidf_ssf_backlog_oldest_seconds` | gauge | `stage` | the oldest's age; `0` when the stage is empty, `NaN` when it could not be counted |
 | `oidf_ssf_backlog_sample_age_seconds` | gauge | | seconds since this node counted |
 | `oidf_ssf_sets_dropped_total` | counter | `source`, `reason` | PingFederate events that raised no SET, or a SET that did not go everywhere |
+| `oidf_client_status_listener_failures_total` | counter | `register` (`device_instance`, `workload_agent`) | status-change listeners (the outbound CAEP channel, the token-endpoint filter's cache) that threw after a committed change; the change stands and the operator's request still succeeds (X-E13) |
+| `oidf_ssf_client_status_sets_total` | counter | `register` (`device_instance`, `workload_agent`), `to_status` (`active`, `suspended`, `revoked`), `outcome` (`emitted`, `loop_guard`, `no_stream`, `not_started`, `failed`) | SETs `OIDF_CLIENT_REVOCATION_CAEP` minted for an instance or agent status change, one per stream, or left unsent (X-E13) |
+| `oidf_ssf_instance_registered_sets_total` | counter | `register` (`device_instance`, `workload_agent`), `outcome` (`emitted`, `no_stream`, `not_started`, `failed`, `disabled`) | instance-registered SETs minted for a new workload agent or device instance, one per stream, or left unsent, one per registration (feature 206) |
+| `oidf_ssf_instance_registrations_followed_total` | counter | `outcome` (`appended`, `already_sent`, `read_failed`, `append_failed`) | device-instance registrations the transmitter read from the instance registry's ledger: appended to the outbox, already appended by this or another node, or not read or appended (#340) |
+| `oidf_ssf_attestation_issued_sets_total` | counter | `kind` (`first`, `renewal`), `outcome` (`emitted`, `no_stream`, `not_started`, `failed`, `disabled`) | attestation-issued SETs minted for an issued client attestation, one per stream, or left unsent, one per issuance (feature 206, #335) |
+| `oidf_ssf_attestation_refused_sets_total` | counter | `reason` (the ten refusal categories), `outcome` (`emitted`, `no_stream`, `no_subject`, `not_started`, `failed`, `disabled`) | attestation-refused SETs minted for a refused attestation request, one per flagged stream, or left unsent, one per refusal (feature 206, #336) |
+| `oidf_ssf_attester_key_rotations_total` | counter | `outcome` (`appended`, `already_sent`, `not_started`, `failed`, `disabled`) | rotations of the attester's signing key this node noticed: appended to the outbox, already appended by another node, or not appended (#337) |
 | `oidf_ssf_push_attempts_total` | counter | `outcome` | push POSTs |
 | `oidf_ssf_dead_sets_total` | counter | `source` | SETs moved to the dead-SET record |
 | `oidf_ssf_stream_lease_claimed_total`, `_lost_total` | counter | | push stream leases claimed, and lost - the lease steal, counted on the node it was taken from |
@@ -234,7 +241,28 @@ across nodes, not `sum`. The `ldm` store is counted only at `outbox`, its node-l
 `oidf_executor_runs_total`, `_failures_total` and `_run_seconds` by `executor`; `oidf_component_retries_total` by
 `component`; the RAR plugin's `oidf_rar_pdp_calls_total`, `_answers_total`, `oidf_rar_pdp_breakers` and
 `oidf_rar_context_dropped_total` (under `copy="rar"`); `oidf_discovery_attestation_members_total`; and the attester's
-`oidf_attester_cloud_evidence_refusals_total`. Their labels are in their catalogues.
+`oidf_attester_cloud_evidence_refusals_total`, `oidf_attester_wallet_evidence_refusals_total`, the wallet
+revocation check's `oidf_attester_wallet_status_checks_total` by `outcome` and `oidf_attester_wallet_status_fetches_total`
+by `result`, `oidf_attester_cimd_fetches_total`, `oidf_attester_bundle_stale_total` (a rising `outcome="refused"` means a client's
+`attestation_bundle_url` has been unreachable for longer than 600 s and its issuance is failing),
+`oidf_attester_agent_refusals_total` (`reason`: `agent_suspended`, `agent_revoked`) and `oidf_agent_status_changes_total`
+(`to`: `active`, `suspended`, `revoked`); the token endpoint's revocation check, `oidf_client_revocation_checks_total` by
+`status` (`active`, `suspended`, `revoked`, `unknown`, `absent`, `unavailable`) and `decision` (`allowed`, `refused`) -
+a rising `status="unavailable"` means a register cannot be read and attested requests are refused 503 - and
+`oidf_instance_status_changes_total` (`to`), the device-instance operator API's changes, and
+`oidf_scim_agent_instance_changes_total` (`register`, `to_status`, `outcome`: `changed`, `unchanged`, `terminal`,
+`precondition_failed`, `conflict`), SCIM's. The Token Status List (X-E12)
+adds the token endpoint's `oidf_client_revocation_status_list_checks_total` by `result` (`valid`, `invalid`,
+`suspended`, `other`, `out_of_bounds`, `absent`, `malformed`, `unavailable`) and `decision` - a rising
+`result="unavailable"` means an attester's list cannot be fetched or verified and its clients are refused 503 - with
+`oidf_client_revocation_status_fetches_total` by `result`; and the attester's `oidf_attester_status_list_requests_total`
+by `result` (`ok`, `not_found`, `off`, `unavailable`, `refused` - a rising `refused` means the signing key policy will
+not sign an issuer's list) and `oidf_attester_status_list_changes_total` (`to_status`). The refresh-token binding
+(X-E15) adds `oidf_attestation_refresh_binding_total` by `action` (`bind`, `refresh`) and `outcome` (`bound`, `matched`,
+`mismatched`, `unknown_allowed`, `unknown_refused`, `unattested_refused`, `unavailable`) - `action="refresh",
+outcome="unknown_allowed"` should fall to nothing once every refresh token issued before 0.8.0 has been refreshed, and a
+rising `outcome="unavailable"` means the attestation store cannot be read and refreshes are refused 503. Their labels
+are in their catalogues.
 
 ## Alerts
 

@@ -1,0 +1,140 @@
+# SPIRE beside the rig: SPIRE Server, one agent, the SPIRE entry reader (services/spire-entry-reader, its image
+# built from that directory's Dockerfile) and a workload that fetches a JWT-SVID. The SPIRE side of plan items X-B07
+# and R-I8; the PingFederate side - its client key pair, the attestation client and the reader client's settings -
+# is B08's, which joins this overlay to the rig's own docker-compose.yml.
+#
+# conformance/spire/smoke.sh brings it up, because two things it needs exist only once SPIRE Server runs: the
+# server's trust bundle, which the agent must hold before it dials the server, and a join token for the agent. The
+# script writes both into the agent's directory under the state directory, with the TLS material
+# conformance/spire/gen-certs.sh makes. Nothing generated is in git (conformance/.gitignore: .spire/).
+#
+#   conformance/spire/smoke.sh                 up, seed two entries for one SPIFFE id, read them through the reader,
+#                                              fetch a JWT-SVID, prove the policy; then down
+#   conformance/spire/smoke.sh --keep          the same, and leave it running (for B08's rig, or a look around)
+#   conformance/spire/smoke.sh --down          stop and remove these services and their volumes, nothing else
+#
+# The topology is the smallest that issues a real JWT-SVID (B07B's Owner decision 2): one server with sqlite and
+# join-token node attestation, one agent with the unix workload attestor. Nothing is published on the host: the
+# reader is reached inside the compose network as https://spire-reader:8443, as PingFederate will reach it.
+#
+# Who may open SPIRE Server's API socket is the access control (the reader's README, "Threat model"). SPIRE 1.15.3
+# creates it rwxrwx--- as the server's user and group, 1000:1000 in the published image; the reader runs as 65532 in
+# group 1000, so it reaches the socket through the group alone, never as the server's user (U-0643). The volume is
+# mounted read-only into the reader as well, which stops nothing (U-0640). What does narrow it is the reference
+# policy (server.conf), which lets only SPIRE's CLI write, and needs the reader in the server's PID namespace.
+# SPIRE_RIG_POLICY=off runs the server with spire/server-open.conf instead, without the policy; the reader still
+# shares the server's PID namespace then, which the server does not need and the reader does not use.
+#
+# PF_RIG_NAME names the compose project, as up.sh does, so a second rig's SPIRE runs beside the first.
+# SPIRE_RIG_STATE moves the state directory (default conformance/.spire); SPIRE_READER_IMAGE names a reader image
+# built elsewhere (CI builds it once and passes it); SPIRE_RIG_AUDIENCE is the audience the workload asks for, the
+# attester's issuer. SPIRE_RIG_SERVER_CONF is set by smoke.sh from SPIRE_RIG_POLICY (on, the default, or off).
+services:
+  spire-server:
+    # 1.15.3, the multi-arch index digest (linux/amd64 and linux/arm64), read 2026-10-09; SpireLiveTest's.
+    image: ghcr.io/spiffe/spire-server:1.15.3@sha256:4082f30d3e0ddc4000a171392c4ea174345ee44d161ee917c70b97b2ecfba141
+    command: ["-config", "/opt/spire/conf/server/server.conf"]
+    labels:
+      owner: ${SPIRE_RIG_OWNER:-pf-agentic-identity-rig}
+    volumes:
+      # server.conf (the reference policy on) unless SPIRE_RIG_POLICY=off picks server-open.conf.
+      - ./spire/${SPIRE_RIG_SERVER_CONF:-server.conf}:/opt/spire/conf/server/server.conf:ro
+      - ../services/spire-entry-reader/spire/policy.rego:/opt/spire/conf/server/policy.rego:ro
+      - ../services/spire-entry-reader/spire/policy_data.json:/opt/spire/conf/server/policy_data.json:ro
+      # Named volumes start with the image's directory and its owner, 1000:1000, so the server can write them.
+      - spire-server-socket:/tmp/spire-server/private
+      - spire-server-data:/var/lib/spire
+    healthcheck:
+      test: ["CMD", "/opt/spire/bin/spire-server", "healthcheck"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  spire-agent:
+    # 1.15.3, the multi-arch index digest, read 2026-10-09. The image runs as root, as upstream ships it.
+    image: ghcr.io/spiffe/spire-agent:1.15.3@sha256:41b0dcd8b258a69db9e2768292a060766fb76fd866e4bc925849981ea1b825ff
+    command: ["-config", "/opt/spire/conf/agent/agent.conf"]
+    labels:
+      owner: ${SPIRE_RIG_OWNER:-pf-agentic-identity-rig}
+    depends_on:
+      spire-server:
+        condition: service_healthy
+    volumes:
+      # agent.conf (with the join token) and bundle.pem, which smoke.sh writes once the server is up.
+      - ${SPIRE_RIG_STATE:-./.spire}/agent:/opt/spire/conf/agent:ro
+      - spire-agent-socket:/tmp/spire-agent/public
+      - spire-agent-data:/var/lib/spire
+    healthcheck:
+      test: ["CMD", "/opt/spire/bin/spire-agent", "healthcheck", "-socketPath", "/tmp/spire-agent/public/api.sock"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    read_only: true
+
+  spire-reader:
+    image: ${SPIRE_READER_IMAGE:-${PF_RIG_NAME:-pf-agentic-identity}/spire-entry-reader:local}
+    build:
+      # Needs `mvn -pl services/spire-entry-reader -am -DskipTests package` first (the Dockerfile says why).
+      context: ../services/spire-entry-reader
+      args:
+        SPIRE_SOCKET_GID: "1000"
+    labels:
+      owner: ${SPIRE_RIG_OWNER:-pf-agentic-identity-rig}
+    depends_on:
+      spire-server:
+        condition: service_healthy
+    # The reference policy refuses a local caller SPIRE cannot see, reads included; sharing the server's PID
+    # namespace is what lets SPIRE see the reader (and read its binary's path, which is not the CLI's).
+    pid: "service:spire-server"
+    user: "65532:1000"
+    env_file:
+      # OIDF_SPIRE_READER_CLIENT_SPKI_SHA256, from gen-certs.sh: the clients the reader serves.
+      - ${SPIRE_RIG_STATE:-./.spire}/reader.env
+    environment:
+      OIDF_DEPLOYMENT_PROFILE: production
+      OIDF_SPIRE_READER_SOCKET: /tmp/spire-server/private/api.sock
+      OIDF_SPIRE_READER_TRUST_DOMAIN: rig.example
+      OIDF_SPIRE_READER_TLS_CERT_FILE: /run/reader-tls/server.crt
+      OIDF_SPIRE_READER_TLS_KEY_FILE: /run/reader-tls/server.key
+      OIDF_SPIRE_READER_CLIENT_CA_FILE: /run/reader-tls/client-ca.crt
+    volumes:
+      - spire-server-socket:/tmp/spire-server/private:ro
+      - ${SPIRE_RIG_STATE:-./.spire}/reader-tls:/run/reader-tls:ro
+    # Nothing is written outside /tmp, where grpc-netty-shaded unpacks Netty's epoll library and loads it: so the
+    # tmpfs must allow exec.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,exec,nosuid,nodev,size=64m
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  # One-shot: fetches a JWT-SVID for the attester's issuer from the agent, as a workload under the unix attestor
+  # (uid 1001), and prints it as JSON. The agent must see the caller's PID to attest it, hence its PID namespace.
+  workload:
+    image: ghcr.io/spiffe/spire-agent:1.15.3@sha256:41b0dcd8b258a69db9e2768292a060766fb76fd866e4bc925849981ea1b825ff
+    entrypoint: ["/opt/spire/bin/spire-agent"]
+    command: ["api", "fetch", "jwt", "-audience", "${SPIRE_RIG_AUDIENCE:-https://localhost:9031}",
+              "-socketPath", "/tmp/spire-agent/public/api.sock", "-output", "json"]
+    labels:
+      owner: ${SPIRE_RIG_OWNER:-pf-agentic-identity-rig}
+    depends_on:
+      spire-agent:
+        condition: service_healthy
+    pid: "service:spire-agent"
+    user: "1001:1001"
+    restart: "no"
+    volumes:
+      - spire-agent-socket:/tmp/spire-agent/public:ro
+    read_only: true
+    network_mode: none
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  spire-server-socket:
+  spire-server-data:
+  spire-agent-socket:
+  spire-agent-data:

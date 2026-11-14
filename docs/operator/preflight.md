@@ -34,7 +34,7 @@ It runs on the JDK that builds this repository (17), on 21, and on the java in P
 
 ```
 java -jar oidf-preflight.jar --env-file FILE [--profile production|development] [--format shell|docker]
-    [--accepted-risks IDS] [--process pingfederate|pingfederate-conformance|device-enrolment|gm-api|db-migrate|all]
+    [--accepted-risks IDS] [--process pingfederate|pingfederate-conformance|device-enrolment|gm-api|spire-entry-reader|db-migrate|all]
 java -jar oidf-preflight.jar --list
 ```
 
@@ -48,7 +48,7 @@ java -jar oidf-preflight.jar --list
 - `--process NAME` - judge against the catalogues that process loads, not every catalogue in the jar: `pingfederate`
   (what `build/pingfederate/stage-modules.sh` stages for production, and the RAR PDP and instance registry plugins a
   consumer deploys into PingFederate), `pingfederate-conformance` (the same and the CIBA simulator), `device-enrolment`,
-  `gm-api` or `db-migrate`. A name no catalogue of that process declares is a warning, as that process's own sweep
+  `gm-api`, `spire-entry-reader` or `db-migrate`. A name no catalogue of that process declares is a warning, as that process's own sweep
   makes it. The default, `all`, is every catalogue in the jar, which no single process loads; the first line of the
   output says which was judged.
 - `--profile` - judge under this profile instead of the file's `OIDF_DEPLOYMENT_PROFILE`. Leave it out to judge as
@@ -155,22 +155,23 @@ One line saying which catalogues were judged (`--process`), then one per switch 
 violation, labelled as server.log labels it, then one per warning, then the verdict. Each violation line is the reason,
 the fix, and the components it refuses in brackets. From this repository's
 `tools/preflight/src/test/resources/fixtures/violations.env` (one line of each kind) with the jar built from this
-branch on JDK 17.0.11, 2026-10-08, the catalogue descriptions cut to `(...)`:
+branch on JDK 17.0.11, 2026-10-09 (with B02B's removed-name line), the catalogue descriptions cut to `(...)`:
 
 ```
-judged against every catalogue in this jar (--process all); no one process loads them all - name the one this file is for with --process pingfederate|pingfederate-conformance|device-enrolment|gm-api|db-migrate
+judged against every catalogue in this jar (--process all); no one process loads them all - name the one this file is for with --process pingfederate|pingfederate-conformance|device-enrolment|gm-api|spire-entry-reader|db-migrate
 REFUSED: OIDF_SSF_ENABLED must be one of true, false, not maybe [SSF]
-not refused (switched off): OIDF_ATTESTER_CIMD_URL is set, which the production profile forbids (...). Unset OIDF_ATTESTER_CIMD_URL (a rig or a demo sets OIDF_DEPLOYMENT_PROFILE=development instead) [ATTESTATION_ISSUER]
 REFUSED: jdk.internal.httpclient.disableHostnameVerification is set, which the production profile forbids (...). Remove -Djdk.internal.httpclient.disableHostnameVerification from the JVM's options (JAVA_OPTS) (a rig or a demo sets OIDF_DEPLOYMENT_PROFILE=development instead) [FEDERATION, AUTO_REGISTRATION, ATTESTATION_AUTH, ATTESTATION_ISSUER, HOSTING, SSF, SSF_RECEIVER, OPERATOR_API, FAPI]
 REFUSED: OIDF_FEDERATION_RESOLVE_DISCOVERY=any, which the production profile allows only with the risk 'resolve-any' accepted (the federation resolve endpoint resolves any entity for anyone, not only this entity's own). Accept the risk by adding resolve-any to OIDF_ACCEPTED_RISKS, or set OIDF_FEDERATION_RESOLVE_DISCOVERY to known, or unset it [FEDERATION]
 REFUSED: OIDF_FEDERATION_IGNORE_SSL_ERRORS cannot be read (OIDF_FEDERATION_IGNORE_SSL_ERRORS must be true or false, not yes), so the production profile cannot tell whether it asks for true, which it governs. Write OIDF_FEDERATION_IGNORE_SSL_ERRORS as its type reads it: true or false (a rig or a demo sets OIDF_DEPLOYMENT_PROFILE=development instead) [FEDERATION, AUTO_REGISTRATION, ATTESTATION_AUTH, ATTESTATION_ISSUER, HOSTING]
 REFUSED: OIDF_OPERATOR_AUDIENCE is unset, and the production profile requires it (...). Set OIDF_OPERATOR_AUDIENCE (a rig or a demo sets OIDF_DEPLOYMENT_PROFILE=development instead) [OPERATOR_API]
 REFUSED: OIDF_OPERATOR_BASE_URL is unset, and the production profile requires it (...). Set OIDF_OPERATOR_BASE_URL (a rig or a demo sets OIDF_DEPLOYMENT_PROFILE=development instead) [OPERATOR_API]
 REFUSED: OIDF_FETCH_ALLOW_HTTP=true, which the production profile forbids (...). Set OIDF_FETCH_ALLOW_HTTP to false, or unset it (a rig or a demo sets OIDF_DEPLOYMENT_PROFILE=development instead) [FEDERATION, AUTO_REGISTRATION, ATTESTATION_AUTH, ATTESTATION_ISSUER, HOSTING, SSF, SSF_RECEIVER, OPERATOR_API]
+not refused (not switched on): OIDF_SPIRE_READER_CLIENT_SPKI_SHA256 is unset, and the production profile requires it (...). Set OIDF_SPIRE_READER_CLIENT_SPKI_SHA256 (a rig or a demo sets OIDF_DEPLOYMENT_PROFILE=development instead) [SPIRE_ENTRY_READER]
 REFUSED: OIDF_FEDERATION_TRUST_ANCHOR is set, under the OIDF_FEDERATION_ family, and no settings catalogue declares it. Correct the name - a misspelling is the usual cause - or unset it; the configuration reference (docs/configuration) lists every name (a rig or a demo sets OIDF_DEPLOYMENT_PROFILE=development instead) [FEDERATION, HOSTING, AUTO_REGISTRATION, ATTESTATION_AUTH]
+not refused (switched off): refused when it is read: OIDF_ATTESTER_CIMD_URL was removed in 0.8.0; set OIDF_CIMD_CLIENTS instead. Unset OIDF_ATTESTER_CIMD_URL [ATTESTATION_ISSUER]
 warning: line 23: JAVA_OPTS's value is quoted; this check removes the quotes, as a shell or Compose's env_file does, but docker run --env-file passes them to the server - judge a Docker env file with --format docker
 warning: OIDF_NOT_A_FAMILY is set and no settings catalogue declares it; it is under no catalogue's family, so nothing refuses it - check the spelling
-warning: OIDF_ACCEPTED_RISKS names 'no-such-risk', which is not a risk this release knows; the ids are no-metadata-policy, attester-binding-off, registration-fail-open, expiry-log-mode, pdp-fail-open, pkce-off, resolve-any, audit-off, in-memory-state, redis-lease - that risk is not accepted
+warning: OIDF_ACCEPTED_RISKS names 'no-such-risk', which is not a risk this release knows; the ids are no-metadata-policy, attester-binding-off, registration-fail-open, expiry-log-mode, pdp-fail-open, pkce-off, resolve-any, audit-off, in-memory-state, redis-lease, client-revocation-off, refresh-binding-off - that risk is not accepted
 8 line(s) under the production profile refuse the components named; each answers 503 until it is fixed
 ```
 
@@ -179,7 +180,7 @@ Line by line, one of each kind:
 | Line | Kind | What to do |
 |---|---|---|
 | `OIDF_SSF_ENABLED must be one of true, false` | A component switch that does not parse. It refuses its component under either profile | Write `true` or `false` |
-| `not refused (switched off): OIDF_ATTESTER_CIMD_URL` | A violation whose only component is switched off: it refuses nothing, and would if the component were switched on | Nothing now; unset it before you switch the component on |
+| `not refused (switched off): refused when it is read: OIDF_ATTESTER_CIMD_URL was removed in 0.8.0` | A removed name, refused when its component reads its settings, under either profile; here its only component is switched off, so it refuses nothing, and would if the component were switched on | Nothing now; set what replaces it, and unset it, before you switch the component on |
 | `jdk.internal.httpclient.disableHostnameVerification is set` | The JVM-wide hostname flag, from `JAVA_OPTS`: it refuses every component | Remove it from the JVM's options and `run.properties` |
 | `OIDF_FEDERATION_RESOLVE_DISCOVERY=any ... risk 'resolve-any'` | A risky switch whose risk is not accepted | Accept the risk in `OIDF_ACCEPTED_RISKS`, or change the value |
 | `OIDF_FEDERATION_IGNORE_SSL_ERRORS cannot be read` | A governed value that does not parse: production reads it as the value it governs | Write it as its type reads it |

@@ -1,0 +1,6 @@
+# The conformance rig for the suite's FAPI-CIBA plan, poll mode: the same configuration as conformance-fapi2.
+profile: conformance-ciba-poll
+description: The conformance rig for the FAPI-CIBA plan in poll mode
+extends: conformance-fapi2
+conformance:
+  plan: ciba-poll

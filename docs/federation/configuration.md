@@ -99,9 +99,10 @@ What follows, part by part, is what the rows leave out.
 - `OIDF_FEDERATION_SUBORDINATE_CONSTRAINTS` is written `{"max_path_length": 0, "naming_constraints": {"permitted":
   [...], "excluded": [...]}, "allowed_entity_types": [...]}`.
 - The init-params `tokenEndpointAuthMethodsSupported`, `clientAttestationSigningAlgValuesSupported`,
-  `clientAttestationPopSigningAlgValuesSupported`, `dpopSigningAlgValuesSupported`,
-  `clientAttestationPopMethodsSupported` and `attestationChallengeEndpointEnabled` default to the attestation
-  profile's values.
+  `clientAttestationPopSigningAlgValuesSupported`, `dpopSigningAlgValuesSupported` and
+  `attestationChallengeEndpointEnabled` default to the attestation profile's values. From 0.8.0 the three algorithm
+  lists are also what the token endpoint accepts, and `clientAttestationPopMethodsSupported` is a removed name: no
+  document carries `client_attestation_pop_methods_supported`.
 - The init-param `clientAttestationFormatsSupported` has no effect. `trustControllerHost` had none either (the
   controller comes from `OIDF_FEDERATION_TRUST_CONTROLLER_HOST`) and was removed in 0.6.0: set, the federation servlet
   doesn't start.
@@ -153,6 +154,10 @@ status - goes through the outbound URL policy.
   (V103, V104), or in each node's memory - which a clustered production node refuses.
 - `OIDF_FEDERATION_KEY_HISTORY_GRACE_SECONDS` must be at least the longest of every Trust Mark type's
   `lifetime_seconds`, `OIDF_REGISTRATION_MAX_TTL_SECONDS` and 3600: shorter is FAILED_CONFIG under production.
+- `OIDF_FEDERATION_HISTORICAL_KEYS_CONSUME` is about other entities' historical keys, not this entity's: with it on, a
+  Trust Mark signed with its issuer's retired key is checked with that key
+  ([operations](operations.md#trust-marks-under-a-retired-key)). Off by default.
+  `OIDF_FEDERATION_HISTORICAL_KEYS_CACHE_SECONDS` (60 to 86400, default 3600) is how long an issuer's answer is kept.
 
 ## Hosted entities and the admin API
 
@@ -164,6 +169,12 @@ All of these are checked when PingFederate starts, whatever the mode.
 
 - With `OIDF_PDP_MODE=local` and no `OIDF_REGISTRATION_ALLOWED_SCOPES`, nothing is asked.
 - With `OIDF_PDP_DISCOVER=true`, a discovery that fails counts as no decision.
+- `OIDF_PDP_DECISION_POINTS` takes eleven names. The seven added in 0.8.0 - `hosted_entity_suspend`,
+  `hosted_entity_reactivate`, `hosted_entity_revoke`, `hosted_entity_rekey`, `trust_mark_grant`, `trust_mark_issue`
+  and `resolve` - are each asked only when listed, and suspend and revoke are asked and recorded only
+  ([operations](operations.md#policy-at-each-step)).
+- Two client extended properties, `federation_pdp_token_issuance` and `federation_pdp_fail_open`, can only tighten
+  these settings for one client ([operations](operations.md#per-client-settings)).
 
 ## Client authentication at the federation endpoints
 

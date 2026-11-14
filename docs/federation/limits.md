@@ -5,11 +5,16 @@ before you promise a partner something. Each item says what happens instead.
 
 ## Not built
 
-- **Checking old statements with an entity's historical keys.** PingFederate publishes its own retired keys at
-  its historical keys endpoint (§8.7), but when it checks another entity's chain it uses only the keys that
-  entity publishes now. A statement signed with a key since rotated fails, and is fetched again. The other way
-  round works from 0.7.0: PingFederate's own Entity Configuration carries its retired keys for their grace, so a
-  peer checking something PingFederate signed just before a rotation still finds the key.
+- **Checking old chain statements, status responses and delegations with an entity's historical keys.** From 0.8.0
+  a Trust Mark another issuer signed with a key it has since retired can be checked with that key from the issuer's
+  historical keys endpoint (§8.7), when `OIDF_FEDERATION_HISTORICAL_KEYS_CONSUME=true` - off by default, and only a key
+  that was valid when the mark was signed, never one revoked as compromised, and never for a mark without `exp`
+  ([operations](operations.md#trust-marks-under-a-retired-key)). Nothing else is: a statement in a chain is checked
+  only with its superior's `jwks` (§10.2: "verify that the signature of ES[j] validates with a public key in
+  ES[j+1]["jwks"]"), and one signed with a key since rotated fails and is fetched again; a Trust Mark status response
+  and a delegation are checked with current keys only, because they are fresh or anchor-given. The other way round
+  works from 0.7.0: PingFederate's own Entity Configuration carries its retired keys for their grace, so a peer
+  checking something PingFederate signed just before a rotation still finds the key.
 - **Rotation across a cluster.** From 0.7.0 one node - the `federation-key-observer` lease holder - records the keys
   PingFederate publishes and moves the active key, after `OIDF_FEDERATION_KEY_ACTIVATION_DELAY_SECONDS`; every node
   signs with that key ([operations.md](operations.md#changing-pingfederates-signing-key)). What is left: signing lags
@@ -27,12 +32,29 @@ before you promise a partner something. Each item says what happens instead.
 - **The subordinate monitor is one node's look.** Under the database store the elected node's fetches decide every
   state; a subordinate that answers that node differently from others is judged by what that node saw. Under the
   settings store each node judges its own look, and nothing is applied.
+- **A self-signed agent rolling its own keys.** From 0.8.0 an operator re-keys a self-signed agent through
+  `POST /federation/admin/entities/rotate-key` with its new public keys (`federation_jwks`), and the agent publishes its
+  configuration again under the new key ([operations](operations.md#self-signed-agents)). The agent cannot do it
+  itself, by signing a new key set with its old key: a stolen key could then pin the thief's key, so that waits for a
+  hold-and-approve step like the one subordinates have. The authority does not publish a re-keyed agent's old keys
+  at its historical keys endpoint either - §8.7 lets "Each Federation Entity" publish "its previously used Federation
+  Entity Keys", and these were the agent's keys, not the authority's.
 - **Other ways to authenticate at the federation endpoints.** `private_key_jwt` only (§8.8 lets a federation
   choose others).
-- **A policy decision for every lifecycle step.** The policy engine is asked at explicit registration,
-  automatic registration, hosted-agent enrolment and token issuance. Not when an agent is suspended, revoked or
-  re-keyed, not when a Trust Mark is issued, and not at resolve.
-- **Per-client policy settings.** Whether and how the policy engine is asked is set for the whole deployment.
+- **The policy engine stopping a suspension or a revocation.** Deliberately: at `hosted_entity_suspend` and
+  `hosted_entity_revoke` the policy engine is asked and its answer recorded, but nothing it says stops either, so an
+  engine that is down or says no can never leave a compromised agent live. Every other step it can be asked at, it
+  can refuse ([operations](operations.md#policy-at-each-step)).
+- **A change seen at once on every node's resolve endpoint.** The node that suspends, revokes or re-keys an agent, or
+  grants or revokes one of its Trust Marks, drops what its resolve endpoint kept about the agent at once. Another node
+  in a cluster can answer from what it kept for up to `OIDF_FEDERATION_RESOLUTION_RESOLVE_CACHE_SECONDS` (60 by
+  default); set it to 0 to close that window (F-0678).
+- **The policy engine on a resolve response that was kept.** A response the resolve endpoint answers from what it
+  kept (up to 60 seconds, F-0383) is served without asking again, whoever asks: with `resolve` listed, a permit for
+  one anonymous caller is served to the next anonymous caller for the same request within the minute.
+- **Per-client policy settings beyond two.** A client can ask about its own tokens
+  (`federation_pdp_token_issuance=true`) and fail closed (`federation_pdp_fail_open=false`); every other PDP setting
+  is the deployment's.
 - **Per-client rate limits.** Deliberately: a stranger could spend a client's allowance in its name. Registration
   is limited by how many chains are checked at once, and so is endpoint client authentication; put a per-source
   rate limit in front of PingFederate if unauthenticated load worries you.

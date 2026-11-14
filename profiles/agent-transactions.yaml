@@ -1,0 +1,16 @@
+# Agents that ask a person to approve a transaction: FAPI 2.0, and CIBA decoupled approval. Development, because the
+# only OOB authenticator this repository ships is the conformance simulator, an approval oracle that production
+# refuses: for production, set ciba.authenticator to custom and name your OOB authenticator (PingOne MFA, say) in the
+# custom block. RAR (rar-paz-plugin) and Grant Management have no Terraform module yet; they stay disabled.
+profile: agent-transactions
+description: FAPI 2.0 and CIBA decoupled approval; RAR and Grant Management once their modules exist
+pf:
+  base_url: https://idp.example.com
+  naming: { id: agenticIdp, display: Agentic IdP }
+deployment:
+  mode: development
+features:
+  fapi2: { par: required }
+  ciba: { authenticator: sim }
+  rar: { enabled: false }
+  grant_management: { enabled: false }

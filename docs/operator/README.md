@@ -22,6 +22,9 @@ What is here now:
 - [deployment-limits.md](deployment-limits.md) - what a release does not support yet, and what goes wrong if
   you deploy it that way: from 0.7.0, a cluster supported in one shape and only for what the cluster suite
   verified, the `ldm` dialect single-node, and the device path until 0.9.0.
+- [deployment-profiles.md](deployment-profiles.md) - one `profiles/<name>.yaml` per deployment: the schema, the
+  presets, `tools/profile.py`'s render, check and author, what `check` refuses, how to write your own, and the
+  generated tables of the settings each feature implies and the attester's evidence types.
 - [health.md](health.md) - the health endpoints, `/agentic-identity/health/{live,ready}`, the detail and
   `/agentic-identity/info`: what ready means and who may read the detail.
 - [issued-details.md](issued-details.md) - from 0.6.0, what holds the `authorization_details` a token carries to the
@@ -42,7 +45,8 @@ What is here now:
   is the move from the last PingFederate 13.0 release to the first 13.1.3 one;
   [0.5.0-to-0.6.0.md](upgrading/0.5.0-to-0.6.0.md) the move to the release that enforces the production profile, the
   preflight run first; [0.6.x-to-0.7.0.md](upgrading/0.6.x-to-0.7.0.md) the move to the release whose database is
-  migrated by `oidf-db-migrate.jar`, `adopt` first.
+  migrated by `oidf-db-migrate.jar`, `adopt` first;
+  [0.7.0-to-0.8.0.md](upgrading/0.7.0-to-0.8.0.md) the move to the release that completes client attestation.
 
 The release notes themselves live in [docs/releases](../releases/README.md); each release's "Before you deploy"
 list is the short form of its upgrade guide. Until the operator set exists, the module READMEs and

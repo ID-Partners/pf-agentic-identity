@@ -1,0 +1,149 @@
+{
+  "schemas": [
+    "urn:ietf:params:scim:schemas:core:2.0:Schema"
+  ],
+  "id": "urn:idpartners:params:scim:schemas:core:1.0:AgentInstance",
+  "name": "AgentInstance",
+  "description": "An agent instance: a device instance (the Identity Object Model's idm.entry agentInstance row) or a workload agent (agent_identity), keyed by the agent_id its client attestations carry. id is the agent_id.",
+  "attributes": [
+    {
+      "name": "register",
+      "type": "string",
+      "multiValued": false,
+      "description": "Which register holds the instance: device_instance or workload_agent.",
+      "required": false,
+      "caseExact": true,
+      "canonicalValues": [
+        "device_instance",
+        "workload_agent"
+      ],
+      "mutability": "readOnly",
+      "returned": "default",
+      "uniqueness": "none"
+    },
+    {
+      "name": "status",
+      "type": "string",
+      "multiValued": false,
+      "description": "The instance's standing: active, suspended or revoked. revoked is terminal. Writable by PATCH.",
+      "required": true,
+      "caseExact": true,
+      "canonicalValues": [
+        "active",
+        "suspended",
+        "revoked"
+      ],
+      "mutability": "readWrite",
+      "returned": "default",
+      "uniqueness": "none"
+    },
+    {
+      "name": "active",
+      "type": "boolean",
+      "multiValued": false,
+      "description": "Whether status is active. PATCH active false suspends, true reactivates.",
+      "required": false,
+      "mutability": "readWrite",
+      "returned": "default",
+      "uniqueness": "none"
+    },
+    {
+      "name": "status_reason",
+      "type": "string",
+      "multiValued": false,
+      "description": "The reason recorded with the last status change. Written by PATCH with a status change, at most 256 characters; returned for workload agents (a device instance keeps it in its ledger entry, not on the row).",
+      "required": false,
+      "caseExact": false,
+      "mutability": "readWrite",
+      "returned": "default",
+      "uniqueness": "none"
+    },
+    {
+      "name": "owner",
+      "type": "complex",
+      "multiValued": false,
+      "description": "Who the instance acts for.",
+      "required": false,
+      "subAttributes": [
+        {
+          "name": "value",
+          "type": "string",
+          "multiValued": false,
+          "description": "For a device instance, the owner's PingOne subject (the involvedParty row's pingoneUserId, the key the SCIM user store writes); for a workload agent, the OAuth client_id the agent was minted under.",
+          "required": false,
+          "caseExact": true,
+          "mutability": "readOnly",
+          "returned": "default",
+          "uniqueness": "none"
+        },
+        {
+          "name": "type",
+          "type": "string",
+          "multiValued": false,
+          "description": "user or client.",
+          "required": false,
+          "caseExact": true,
+          "canonicalValues": [
+            "user",
+            "client"
+          ],
+          "mutability": "readOnly",
+          "returned": "default",
+          "uniqueness": "none"
+        },
+        {
+          "name": "issuer",
+          "type": "string",
+          "multiValued": false,
+          "description": "For a workload agent, the attester (iss) the agent was minted by.",
+          "required": false,
+          "caseExact": true,
+          "mutability": "readOnly",
+          "returned": "default",
+          "uniqueness": "none"
+        }
+      ],
+      "mutability": "readOnly",
+      "returned": "default",
+      "uniqueness": "none"
+    },
+    {
+      "name": "device",
+      "type": "complex",
+      "multiValued": false,
+      "description": "The device a device instance runs on. Absent for a workload agent.",
+      "required": false,
+      "subAttributes": [
+        {
+          "name": "value",
+          "type": "string",
+          "multiValued": false,
+          "description": "The device's id.",
+          "required": false,
+          "caseExact": true,
+          "mutability": "readOnly",
+          "returned": "default",
+          "uniqueness": "none"
+        }
+      ],
+      "mutability": "readOnly",
+      "returned": "default",
+      "uniqueness": "none"
+    },
+    {
+      "name": "issuer",
+      "type": "string",
+      "multiValued": false,
+      "description": "The agent platform or attester the instance belongs to: a device instance's platform entity id, a workload agent's iss.",
+      "required": false,
+      "caseExact": true,
+      "mutability": "readOnly",
+      "returned": "default",
+      "uniqueness": "none"
+    }
+  ],
+  "meta": {
+    "resourceType": "Schema",
+    "location": "/federation/scim/v2/Schemas/urn:idpartners:params:scim:schemas:core:1.0:AgentInstance"
+  }
+}

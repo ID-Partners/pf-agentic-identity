@@ -1,0 +1,24 @@
+# Workloads as OAuth clients that authenticate with client attestation: FAPI 2.0 at the authorization server, the
+# co-hosted attester checking each workload's platform evidence, and the Shared Signals transmitter. The values under
+# attestation are examples: name your own clusters, accounts and OpenBao transit key.
+profile: workload-agents
+description: FAPI 2.0 and client attestation for workloads, with the attester checking their platform evidence
+pf:
+  base_url: https://idp.example.com
+  naming: { id: agenticIdp, display: Agentic IdP }
+  client_storage: jdbc
+  extended_properties: true
+  postgres: { host: postgres, ca_file: /opt/pf/tls/postgres-ca.crt }
+deployment:
+  mode: production
+  accepted_risks: []
+features:
+  fapi2: { par: required }
+  attestation:
+    auth: true
+    issuer: true
+    evidence: [eks]
+    aws:
+      eks_issuers: [https://oidc.eks.us-east-1.amazonaws.com/id/EXAMPLED539D4633E53DE1B71EXAMPLE]
+    signing_key_ref: transit/attester
+  ssf: { transmitter: true }

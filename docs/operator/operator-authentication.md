@@ -25,6 +25,17 @@ The static bearer `OIDF_AUTHORITY_ADMIN_TOKEN` is development's escape and nothi
    | `ssf.admin` | the Shared Signals transmitter's administration |
    | `oidf.metrics.read` | scrape `/agentic-identity/metrics` ([metrics.md](metrics.md)) |
    | `oidf.health.read` | read the health detail and `/agentic-identity/info` |
+   | `oidf.admin.agents.read` | read the attester's agent registry: look an agent up, list a client's agents, read an agent's audit (since 0.8.0) |
+   | `oidf.admin.agents` | suspend, reactivate and revoke an agent at the attester (since 0.8.0) |
+   | `oidf.admin.instances.read` | read the device-instance registry: look an instance up, list a device's, read an instance's ledger (since 0.8.0) |
+   | `oidf.admin.instances` | suspend, reactivate and revoke a device instance (since 0.8.0) |
+   | `oidf.admin.scim.read` | read agent instances, both registers, through SCIM, and SCIM discovery (since 0.8.0) |
+   | `oidf.admin.scim` | suspend, reactivate and revoke an agent instance by SCIM PATCH, in either register (since 0.8.0) |
+
+   Never grant `oidf.admin.agents` to an agent's own client. The attester does not stop a token that holds it from
+   reactivating the agent it was issued to (`AgentAdminServlet`): the only control is that PingFederate gives the
+   scope to operator clients alone. The same holds for `oidf.admin.instances` and a device instance's client, and for
+   `oidf.admin.scim` and either.
 
 2. **An access token manager whose tokens name the operator APIs as their audience.** A JWT manager: set its
    Audience Claim Value to the value of `OIDF_OPERATOR_AUDIENCE`, and its Type Header Value to `at+jwt` (RFC 9068;
@@ -145,6 +156,65 @@ since the stream id sits inside the path, and answers 404 for anything else:
 | `POST /ssf/admin/streams/{id}:resume` | `ssf.admin` | `ssf-admin.streams.resume` |
 | `POST /ssf/admin/streams/{id}/sets:retry-dead` | `ssf.admin` | `ssf-admin.streams.retry-dead` |
 
+The attester's agent registry (AgentAdminServlet in servlets/attestation-issuer; `OperatorApi.AGENT_ADMIN`, since 0.8.0,
+plan item X-A22). It sits under the attester's own prefix, `/federation/attestation/agents`: `/federation/agents` hosts
+OpenID Federation entities, which are not these. With `OIDF_AGENT_REGISTRY_MODE=off` every request is 503
+`registry_disabled`; otherwise the servlet parses the path to the operation before it looks at a token and answers 404
+for anything else. A change is made as the operator the token names (`sub`), recorded in `agent_status_audit_log` and
+emitted as `agent.status_changed`; a record shows the workload's `instance_subject` beside its `agent_id`, to operators
+only:
+
+| Method and path | Scope | Route |
+|---|---|---|
+| `GET /federation/attestation/agents/?client_id=..[&iss=..&status=..&after=..&limit=..]`, or with `iss`, `instance_format` and `instance_subject` for one | `oidf.admin.agents.read` | `agent-admin.agents.list` |
+| `GET /federation/attestation/agents/{agent_id}` | `oidf.admin.agents.read` | `agent-admin.agents.read` |
+| `GET /federation/attestation/agents/{agent_id}/audit` | `oidf.admin.agents.read` | `agent-admin.agents.audit` |
+| `POST /federation/attestation/agents/{agent_id}:suspend` | `oidf.admin.agents` | `agent-admin.agents.suspend` |
+| `POST /federation/attestation/agents/{agent_id}:reactivate` | `oidf.admin.agents` | `agent-admin.agents.reactivate` |
+| `POST /federation/attestation/agents/{agent_id}:revoke` | `oidf.admin.agents` | `agent-admin.agents.revoke` |
+
+A change takes `{"reason": "...", "expected_version": n}`: the reason is required, at most 256 characters, and is kept
+in the audit log and the event, so name an incident or a ticket, never a person. A stale `expected_version` is 409
+`version_conflict` with `current_version`; a move the status does not allow is 409 `invalid_transition`. Revoke is
+final: a revoked workload that should return gets a new identity.
+
+The device-instance registry (InstanceAdminServlet in servlets/attestation-issuer; `OperatorApi.INSTANCE_ADMIN`, since
+0.8.0, plan item X-E11), over the Identity Object Model registry `OIDF_INSTANCE_REGISTRY_DATA_STORE_ID` names. With none
+named every request is 503 `registry_disabled`; otherwise the path is parsed to the operation before a token is looked
+at, as for agents. A change is made as the operator the token names, written to the model's ledger with the operator as
+`actor`, and emitted as `instance.status_changed`:
+
+| Method and path | Scope | Route |
+|---|---|---|
+| `GET /federation/attestation/instances/?device_id=..` | `oidf.admin.instances.read` | `instance-admin.instances.list` |
+| `GET /federation/attestation/instances/{instance_id}` | `oidf.admin.instances.read` | `instance-admin.instances.read` |
+| `GET /federation/attestation/instances/{instance_id}/audit` | `oidf.admin.instances.read` | `instance-admin.instances.audit` |
+| `POST /federation/attestation/instances/{instance_id}:suspend` | `oidf.admin.instances` | `instance-admin.instances.suspend` |
+| `POST /federation/attestation/instances/{instance_id}:reactivate` | `oidf.admin.instances` | `instance-admin.instances.reactivate` |
+| `POST /federation/attestation/instances/{instance_id}:revoke` | `oidf.admin.instances` | `instance-admin.instances.revoke` |
+
+A change takes `{"reason": "...", "expected_status": "active"}`: the reason as for agents, `expected_status` optional.
+The registry has no version column, so the guard is the status: the change is made only while the instance is still in
+the status it was read in, and an `expected_status` that is not the current one, or a change that lost a race to
+another, is 409 `status_conflict` with `current_status`. A move the status does not allow is 409 `invalid_transition`;
+revoke is final. The token endpoint refuses a suspended or revoked instance at its next request
+([attestation-token-endpoint.md](../configuration/attestation-token-endpoint.md)).
+
+The agent instances through SCIM (AgentInstanceScimServlet in servlets/attestation-issuer;
+`OperatorApi.SCIM_AGENT_INSTANCES`, since 0.8.0, plan item X-E14), on when `OIDF_SCIM_AGENT_INSTANCES=true` and 404
+otherwise. It serves device instances and workload agents as one SCIM resource type, `AgentInstance`
+([scim/agent-instance.md](../scim/agent-instance.md)). An unknown path is 404 and a method the path does not take 405,
+both before a token is looked at; the authenticator's refusals are written in the SCIM error schema, status and headers
+kept. A change is made as the provisioner the token names, through the register's own guarded update and audit row,
+and emitted as `agent_instance.scim_status_changed`:
+
+| Method and path | Scope | Route |
+|---|---|---|
+| `GET /federation/scim/v2/AgentInstances?filter=..` | `oidf.admin.scim.read` | `scim.agent-instances.list` |
+| `GET /federation/scim/v2/AgentInstances/{agent_id}` | `oidf.admin.scim.read` | `scim.agent-instances.read` |
+| `PATCH /federation/scim/v2/AgentInstances/{agent_id}` | `oidf.admin.scim` | `scim.agent-instances.patch` |
+| `GET /federation/scim/v2/Schemas`, `/ResourceTypes`, `/ServiceProviderConfig` | `oidf.admin.scim.read` | `scim.discovery` |
+
 `oidf.admin.subordinates` asks to enrol and re-pin subordinates, removes them, and withdraws a change it asked for
 (`POST /federation/admin/subordinates`, `/subordinates/keys`, `/subordinates/remove`, `/subordinates/changes/withdraw`,
 routes `federation-admin.subordinates.enrol`, `.keys`, `.remove` and `.withdraw`, since 0.7.0);
@@ -155,7 +225,9 @@ reading them (`GET /subordinates`, `/subordinates/audit`, `/subordinates/changes
 
 Every scope has a route in this release. The RAR models' fingerprint is not served over HTTP at all. The tests `OperatorApiRoutesTest`,
 `HealthServletTest` and `SsfRoutesTest` read every `@WebServlet` mapping in their modules and fail on a path or method
-that has no route and is not listed as not being one.
+that has no route and is not listed as not being one. `AgentAdminServletTest` holds AgentAdminServlet's mapping and every operation it parses to
+`OperatorApi.AGENT_ADMIN`, and `AgentInstanceScimServletTest` AgentInstanceScimServlet's to
+`OperatorApi.SCIM_AGENT_INSTANCES`.
 
 ## The static bearer
 

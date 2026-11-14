@@ -1,0 +1,12 @@
+# Every feature that has a Terraform module, together: federated-agents and CIBA. Development, for the reason
+# agent-transactions gives: the CIBA authenticator is the simulator until you name your own.
+profile: full
+description: Every feature with a module - federation, attestation, FAPI 2.0, CIBA, SSF - for development
+extends: federated-agents
+deployment:
+  mode: development
+features:
+  ciba: { authenticator: sim }
+  ssf: { transmitter: true, emitter: true }
+  rar: { enabled: false }
+  grant_management: { enabled: false }

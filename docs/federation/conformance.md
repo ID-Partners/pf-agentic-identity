@@ -73,6 +73,18 @@ Three more measures:
   93% of PingFederate's side (712 of 767). It runs weekly in CI and by hand (`mvn -Pmutation verify` on either
   module), and fails below 85%.
 
+**What the suite exercised, against what we pin.** `conformance/suite/run-plan.py --save-logs` keeps every module's
+log, and `tools/suite-log-ids.py` reads the requirement ids the suite logged (a `requirements` array on each entry,
+`OIDFED-8.3.1` and the like) and joins them to our `@Requirement` tags. On 2026-10-11 (PingFederate 13.1.3, the suite
+from `conformance/suite/suite-compose.yml`, through `tools/ci/licensed-conformance.sh`): the deployed-entity plan
+(`SNdbA1AzWCobR`, 5 modules) logged 19 OpenID Federation ids and the OP plan (`f2jrcUdrKhGNj`, 20 modules) 16, 20 between
+them - §1.2, §3, §3.1.1, §3.2, §5, §5.1.1 to §5.1.6, §8.1.1, §8.1.2, §8.3.1, §8.3.2, §9, §9.2, §10.2, §11.3 and
+§12.1.1.1. Every one is pinned by our tests; none is exercised and not pinned. Of the 92 sections our tests pin, 65
+are not exercised by either plan - among them metadata policy (§6.1.3 onwards), Trust Marks (§7), the list, Trust
+Mark, historical keys and endpoint-authentication endpoints (§8.2, §8.4 to §8.8), explicit registration (§12.2) and
+renewal (§12.3): the suite's two plans do not reach them, so our tests are their only check. `--check` fails a run that
+exercises an id we do not pin, unless `conformance/suite-log-ids.json` says why.
+
 To run them: `mvn verify` from the repository root, then `python3 tools/coverage-report.py` to write the
 dashboard to `docs/coverage-dashboard.md` (not tracked; CI publishes it as the `coverage-dashboard` artefact of
 every Build run whose reactor build completes). [`docs/federation/conformance-matrix.md`](conformance-matrix.md)

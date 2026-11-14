@@ -1,0 +1,7 @@
+# The conformance rig for the suite's Shared Signals transmitter and CAEP interop plans: the same configuration as
+# conformance-fapi2.
+profile: conformance-ssf
+description: The conformance rig for the SSF transmitter and CAEP interop plans
+extends: conformance-fapi2
+conformance:
+  plan: ssf

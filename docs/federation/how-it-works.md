@@ -235,7 +235,7 @@ worth knowing where the gaps are.
 
 | You do this | This stops | This carries on |
 |---|---|---|
-| Suspend or revoke an agent PingFederate hosts | Its Entity Configuration and the statement about it stop being served at once, so every new chain through it fails | Registrations other OPs already made last until they expire - at most their chain's life - and tokens already issued until theirs do |
+| Suspend or revoke an agent PingFederate hosts | Its Entity Configuration and the statement about it stop being served at once, so every new chain through it fails; from 0.8.0 PingFederate's token and PAR endpoints refuse the agent at once too (401 `invalid_client`, F-0679, whatever `OIDF_AUTO_REGISTRATION_FAIL_CLOSED` says), reading the registry every node shares; the authorization endpoint shows its error page when `pageOnAuthorizationError` is on, and otherwise lets the request through to a code the token endpoint then refuses; a CIBA (`/as/bc-auth.ciba`) or device authorization request is not checked when it starts, only at its token poll | Registrations other OPs made last until they expire, at most their chain's life or their own limit, and tokens already issued until theirs do |
 | An anchor or intermediate stops vouching for an entity | New chains to it fail | Existing registrations until they're due for renewal; then the renewal fails |
 | Disable the client in PingFederate | Its tokens, at once | Nothing - an operator's disable is never undone by a renewal |
 | Revoke a Trust Mark grant | The status endpoint answers `revoked`; new registrations that require the mark fail | Copies of the mark already handed out verify until they expire, for anyone who doesn't check status |

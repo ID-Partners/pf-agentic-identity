@@ -1,0 +1,26 @@
+# The conformance rig for the suite's OpenID Federation OP plan (conformance/vars.federation-op.env until phase 3):
+# the federation profile, and PF joined to the suite's own federation. For each run the suite hosts a trust anchor at
+# <suite>/test/a/<alias>/trust-anchor and a relying party under it, which registers at PF's authorization and PAR
+# endpoints. Whoever runs the image fills in {{SUITE_BASE_URL}}, {{SUITE_ALIAS}} and the anchor's public keys.
+profile: conformance-federation-op
+description: The conformance rig for the OpenID Federation OP plan, PF joined to the suite's federation
+extends: conformance-federation
+features:
+  # The plan's RP sends its request object by value at the authorization endpoint, which PAR required refuses.
+  fapi2: { par: enabled }
+material:
+  # PF fetches the suite RP's jwks_uri itself, over TLS it checks against its trusted CAs.
+  trusted_cas: { conformance-suite-ca: suite-tls-ca.crt }
+conformance:
+  plan: federation-op
+env:
+  OIDF_FEDERATION_TRUST_ANCHOR_JWKS: '{"{{SUITE_BASE_URL}}/test/a/{{SUITE_ALIAS}}/trust-anchor": {{PUBLIC_JWKS:suite-trust-anchor}}}'
+  # The suite is on this machine, reached as host.docker.internal: a private address the outbound policy refuses
+  # unless the host is named.
+  OIDF_FETCH_HOST_ALLOWLIST: host.docker.internal
+  # This module's fetches of the suite's entity statements; the suite's certificate is from keys/suite-tls-ca.crt.
+  OIDF_FEDERATION_IGNORE_SSL_ERRORS: "true"
+  # The suite's anchor publishes no metadata_policy; the rig accepts that, to test registration itself.
+  OIDF_REQUIRE_METADATA_POLICY: "false"
+  # The suite's RP sends no PKCE.
+  OIDF_AUTO_REGISTRATION_REQUIRE_PKCE: "false"

@@ -70,7 +70,7 @@ tree:
 | `tls/ca.crt`, `ca.key` | the stack's CA, kept once made (C-7 issues its recording SET receiver's certificate from it); the archive puts it in PingFederate's trusted CAs ([Trust](#trust)) | `lib/gen-tls.sh` |
 | `tls/<server>.crt`, `.key` | a leaf for PostgreSQL, Redis, OpenBao and PingFederate (`pf.p12` for its import), reissued when its names change | `lib/gen-tls.sh` |
 | `secrets/*` | the roles' passwords, Redis's `oidf` password, the cluster password, the SSF secret key, the smoke client's secret, the authoring administrator's password, the age identity; `*.curl`, the scripts' `curl -K` files for the administrator and smoke client | `lib/gen-secrets.sh` |
-| `data.zip.age` | the config archive, authored on a localhost PingFederate by `reference/terraform/<stack>` and encrypted to the age recipient; the plaintext is deleted | `lib/author.sh` |
+| `data.zip.age` | the config archive, authored on a localhost PingFederate from `profiles/minimal.yaml` (`tools/profile.py author`; the cluster with `pf.client_storage=jdbc`) and encrypted to the age recipient; the plaintext is deleted | `lib/author.sh` |
 | `oidf-db-migrate.jar`, `context/` | the migration runner and the image's build context, staged for the production profile | `lib/build-image.sh` |
 
 `REF_REAUTHOR=1` authors the archive again (once per name otherwise: the issuer's port is in it). `SKIP_BUILD=1` reuses
@@ -147,8 +147,8 @@ the production profile would refuse.
 - **Evaluation licences.** Each node fetches one with your DevOps credentials.
 - **One host.** Every container on one Docker network; HAProxy is the only front door, with no TLS of its own
   (passthrough) and no redundancy.
-- **The Terraform.** `reference/terraform/modules/pf-reference` configures what the stacks need to boot and hand out
-  one token; a deployment's own configuration replaces it.
+- **The configuration.** `profiles/minimal.yaml`, applied through `deploy/terraform/agentic-idp`, configures what the
+  stacks need to boot and hand out one token; a deployment's own profile replaces it.
 - **HAProxy's runtime API.** `stats socket ipv4@0.0.0.0:9999 level admin` (`haproxy/haproxy.cfg`), unauthenticated: published to 127.0.0.1
   only, but any container on the stack's network can drain or disable an engine with it. A deployment binds it to a
   Unix socket or a management network.

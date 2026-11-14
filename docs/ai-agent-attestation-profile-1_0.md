@@ -64,7 +64,7 @@ about them:
 
 - **Attester trust establishment.** How an authorization server decides it trusts the signing key behind
   a given `iss` — OpenID Federation trust chains, a pinned `x5c`/`kid`+`jku`, or something else — is not
-  addressed by this profile. [ABCA] itself puts this out of scope (§9.8); this profile does not re-scope
+  addressed by this profile. [ABCA] itself puts this out of scope (§10.8); this profile does not re-scope
   it in. [CAS] §6.2 discusses trust models for client metadata sources, which is an adjacent but distinct
   question (trusting *who a client is bound to*, not trusting *who signed the attestation*).
 - **Revocation propagation.** This profile does not require SSF/CAEP or any other real-time revocation
@@ -393,7 +393,7 @@ each of the above.
 - **[RFC7519] / [RFC7800]** — JWT, Proof-of-Possession Key Semantics for JWTs (`cnf`).
 - **[RFC9449]** — OAuth 2.0 Demonstrating Proof of Possession (DPoP).
 - **[ABCA]** — OAuth 2.0 Attestation-Based Client Authentication,
-  draft-ietf-oauth-attestation-based-client-auth-10.
+  draft-ietf-oauth-attestation-based-client-auth-11.
 
 ### 12.2 Informative
 
@@ -420,7 +420,7 @@ The choices this profile makes where [ABCA] leaves options open, and why — in 
 | 3 | Lifetime ceiling | 18 hours (ceiling, not target) | Admits infrastructure-hosted agents with stable posture, where re-minting is expensive, without removing [CAS]'s own shorter (300s) recommendation for the common, revocation-sensitive case |
 | 4 | Reuse | Permitted within the window, single-verifier only | Single-use adds no protection PoP doesn't already provide; the single-verifier constraint is what actually preserves `agent_id`'s pseudonymity |
 | 5 | `sub` semantics | Agent Type (ABCA-conformant); `agent_id` carries the instance | Keeps `sub` meaning what OAuth already expects it to mean, avoids one-client-per-instance |
-| 6 | Attester trust establishment | Left entirely out of scope | [ABCA] itself already excludes it (§9.8); folding it into this profile would conflate two separable questions (what the attestation *asserts* vs. how the AS decides to *trust the signer*) that different deployments answer differently |
+| 6 | Attester trust establishment | Left entirely out of scope | [ABCA] itself already excludes it (§10.8); folding it into this profile would conflate two separable questions (what the attestation *asserts* vs. how the AS decides to *trust the signer*) that different deployments answer differently |
 | 7 | Entitlement claim | Optional extension, enforcement point unspecified | Not every deployment needs attester-asserted RAR ceilings; where it's used, *where* containment is enforced is an architecture choice this profile shouldn't foreclose |
 | 8 | Shared credentials | Excluded explicitly | Makes the fleet-scale premise of the whole document a testable conformance point, not an assumption |
 

@@ -1,0 +1,13 @@
+# The standard agentic IdP: workload-agents, and PingFederate in an OpenID Federation - relying parties and agents
+# registered automatically from their trust chains, agents hosted as subordinates, and the operator API that manages
+# them. The trust anchor is an example: name yours, and pin its keys with jwks.
+profile: federated-agents
+description: The standard agentic IdP - workload-agents plus OpenID Federation registration and hosting
+extends: workload-agents
+features:
+  federation:
+    auto_registration: true
+    hosting: true
+    operator_api: {}
+    trust_anchors:
+      - entity_id: https://trust-anchor.example.com

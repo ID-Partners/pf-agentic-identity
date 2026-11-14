@@ -3,13 +3,13 @@
 # conformance suite. The rendered files carry the clients' PRIVATE keys and the test user's password,
 # so they are git-ignored; the templates carry neither and are not.
 #
-#   PF_BASE_URL   defaults to terraform's pf_base_url default
+#   PF_BASE_URL   the issuer the rig was authored with; default https://localhost:${PF_PORT_HTTPS:-9031}, up.sh's
 #   PF_LOCAL_URL  where this machine reaches PF (default https://localhost:${PF_PORT_HTTPS:-9031}), for a
 #                 template that needs something only the running PF knows: {{PF_FEDERATION_JWKS}}, the
 #                 jwks of its entity configuration
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"; RIG="$(dirname "$HERE")"
-BASE="${PF_BASE_URL:-$(sed -n 's/^  default *= *"\(https:[^"]*\)"$/\1/p' "$RIG/terraform/variables.tf" | head -1)}"
+BASE="${PF_BASE_URL:-https://localhost:${PF_PORT_HTTPS:-9031}}"
 [[ -n "$BASE" ]] || { echo "ERROR: could not determine PF_BASE_URL" >&2; exit 1; }
 umask 177
 PF_BASE_URL="$BASE" PF_LOCAL_URL="${PF_LOCAL_URL:-https://localhost:${PF_PORT_HTTPS:-9031}}" RIG="$RIG" python3 - "$HERE"/*.template.json <<'PY'

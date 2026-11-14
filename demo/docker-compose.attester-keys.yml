@@ -1,0 +1,56 @@
+# The attester signing with an OpenBao transit key under production rules (plan item X-B04), for REL5's feature run.
+#
+# Adds an OpenBao dev server with one ecdsa-p256 transit key, attestation-es256, and points the attester at it with
+# OIDF_ATTESTER_SIGNING_KEYS set, so the key-ref rules are the production ones: a key ref must be listed for the
+# client's attestation_issuer (they are enforced in development too once the list is set; the rig's profile keeps it
+# on the development profile for the CIBA simulator). deploy/terraform/modules/conformance-clients adds the
+# PingFederate-store client that names the key when the profile's conformance.attester is set at author time: up.sh
+# sets it from TF_VAR_attester_signing_key_ref and TF_VAR_attester_spiffe_bundle, and passes TF_VAR_attester_client_secret
+# on as the client's secret:
+#
+#   TF_VAR_attester_signing_key_ref=attestation-es256 TF_VAR_attester_spiffe_bundle=<public JWKS> \
+#   TF_VAR_attester_client_secret=<any> \
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.attester-keys.yml PF_RIG_NAME=pfai-attester-keys ./up.sh
+#
+# Then POST /federation/attestation for conformance-attester-transit issues an attestation whose kid is the
+# thumbprint of version 1. Rotate the key during the run and the attester signs with version 2, with a new kid,
+# within OIDF_ATTESTER_SIGNING_KEY_REFRESH_SECONDS (60 here), with no restart:
+#
+#   docker exec <rig>-openbao bao write -f transit/keys/attestation-es256/rotate
+#
+# The dev server keeps nothing on disk and its root token is fixed: a rig, never a deployment. The attester's own
+# docs (servlets/attestation-issuer/README.md, "Signing keys") have the token policy a deployment uses instead.
+services:
+  openbao:
+    image: quay.io/openbao/openbao:2.4.1
+    container_name: ${PF_RIG_NAME:-pf-agentic-identity}-openbao
+    command: ["server", "-dev", "-dev-listen-address=0.0.0.0:8200"]
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: rig-root-token
+    healthcheck:
+      test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  openbao-init:
+    image: quay.io/openbao/openbao:2.4.1
+    depends_on:
+      openbao:
+        condition: service_healthy
+    environment:
+      BAO_ADDR: http://openbao:8200
+      BAO_TOKEN: rig-root-token
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - bao secrets enable transit && bao write -f transit/keys/attestation-es256 type=ecdsa-p256
+    restart: "no"
+  pingfederate:
+    depends_on:
+      openbao-init:
+        condition: service_completed_successfully
+    environment:
+      OIDF_ATTESTATION_ISSUER_ENABLED: "true"
+      OIDF_OPENBAO_URL: http://openbao:8200
+      OIDF_OPENBAO_TOKEN: rig-root-token
+      OIDF_ATTESTER_SIGNING_KEYS: '{"attestation-es256": {"issuers": ["https://attester.example.com"]}}'
+      OIDF_ATTESTER_SIGNING_KEY_REFRESH_SECONDS: "60"

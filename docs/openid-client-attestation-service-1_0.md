@@ -71,7 +71,7 @@ the `attest_jwt_client_auth` method, and the authorization-server challenge mech
 scope: the protocol by which a client instance authenticates to the attester and obtains its
 attestation. A CAS issues [ABCA]-conformant Client Attestation JWTs; where this document mentions
 their claims it does so descriptively, and [ABCA] controls in any conflict. This document additionally
-defines two extension claims carried in issued attestations (Section 4.5), relying on [ABCA]'s rule
+defines three extension claims carried in issued attestations (Section 4.5), relying on [ABCA]'s rule
 that unrecognised claims are ignored — with the enforcement consequence addressed in Section 7.
 
 **Adjacent work.** Wallet ecosystems ([HAIP], EUDI wallet architectures) define issuance of Wallet
@@ -339,12 +339,13 @@ is the CAS identifier, `sub` is the OAuth Client Identifier of the resolved clie
 attested Instance Key as an RFC 7800 `jwk`, and `exp − iat` SHOULD be short (default 300 s;
 Section 8).
 
-This specification defines two **extension claims** carried in issued attestations:
+This specification defines three **extension claims** carried in issued attestations:
 
 | Claim | Description |
 |---|---|
 | `workload` | Instance provenance (below). |
 | `authorization_details` | The effective (policy-applied) entitlement [RFC9396]. OPTIONAL; absent when the deployment does not use entitlements. |
+| `agent_id` | The instance's pseudonymous identifier, minted by the CAS; see the AI Agent Profile §6. Present in every attestation from a CAS that keeps an agent registry, which then lists it in `attestation_claims_issued` (Section 5.1); absent otherwise. |
 
 Per [ABCA], recipients ignore claims they do not understand — so these extensions never break an
 [ABCA]-conformant verifier, but they are also not enforced by one. Section 7 states the profile
@@ -378,7 +379,7 @@ Errors use HTTP 400 (or the status noted: 401, 403, 429, 500 or 503) with:
 | `invalid_request` | Malformed or missing parameters. |
 | `invalid_client` | Unknown, unresolvable, revoked, or unconfigured client. (401) |
 | `invalid_instance_attestation` | The Instance Attestation failed validation, or its bound key mismatches `instance_key`. |
-| `instance_not_authorized` | Valid attestation, but the subject is not bound to the client. (403) |
+| `instance_not_authorized` | Valid attestation, but the subject is not bound to the client, or the instance has been suspended or revoked at the CAS. (403) |
 | `invalid_instance_proof` | The Instance Key Proof failed (signature, `aud`, expiry, replay, challenge). |
 | `instance_attestation_bound` | The Instance Attestation is already bound to a different Instance Key or client (Section 9.1). (401) |
 | `access_denied` | The requested `authorization_details` exceed the permitted ceiling. (403) |
@@ -413,7 +414,7 @@ GET {issuer}/.well-known/client-attestation-service
 | `proof_signing_alg_values_supported` | OPTIONAL | JWS algorithms accepted for the Instance Key Proof. |
 | `request_parameters_required` | OPTIONAL | The request members the CAS requires (Section 5.3.1); default `["client_id","instance_key","instance_attestation","proof"]`. |
 | `proof_claims_required` | OPTIONAL | Claims the Instance Key Proof must carry (Section 5.3.1); default `["aud","jti"]`. MUST include `"challenge"` when `challenge_required` is `true`. |
-| `attestation_claims_issued` | OPTIONAL | Claims present in every issued attestation (Section 5.3.1); default `["iss","sub","iat","exp","cnf","workload"]`. |
+| `attestation_claims_issued` | OPTIONAL | Claims present in every issued attestation (Section 5.3.1); default `["iss","sub","iat","exp","cnf","workload"]`. A CAS that keeps an agent registry adds `agent_id`: it mints one into every attestation or refuses the request. |
 | `attestation_claims_optional` | OPTIONAL | Claims issued only when applicable; default `["authorization_details"]`. |
 | `custom_claims_required` | OPTIONAL | Additional deployment-defined claims the CAS requires in the Instance Key Proof before it will mint (Section 5.3.2). |
 | `custom_claims_supported` | OPTIONAL | Deployment-defined claims the CAS understands as policy evidence but does not require (Section 5.3.2). |
@@ -649,13 +650,17 @@ source, the CAS, the AS).
 - **Refresh = re-attest.** The instance refreshes by re-calling the issuance endpoint with a *fresh*
   Instance Attestation. Refresh therefore re-checks, every time: the instance's standing with its
   runtime authority, the client's standing with its metadata source, the binding, and policy.
-- **Revocation levers**, in increasing blast radius: remove one binding (that instance stops
+- **Revocation levers**, in increasing blast radius: suspend or revoke one instance's `agent_id` at
+  the CAS (its next re-attestation is refused); remove one binding (that instance stops
   re-attesting); revoke the client at its metadata source (all instances stop); rotate the instance
   trust root (the runtime domain stops); remove the CAS's federation membership (everything it signed
   stops verifying at chain-validating parties).
 - Deployments SHOULD choose `issued_ttl` as their revocation-latency bound: with a 300-second TTL, a
   deauthorized instance holds usable credentials for at most five minutes, with no per-request
   revocation traffic at the AS.
+- An AS that can read the register an instance's `agent_id` is kept in MAY check it at every
+  authentication instead, and so refuse a suspended or revoked instance whose attestation is unexpired.
+  This implementation does so when a register is configured (`OIDF_CLIENT_REVOCATION_MODE`, since 0.8.0).
 
 ---
 

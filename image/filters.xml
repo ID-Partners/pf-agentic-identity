@@ -206,7 +206,7 @@
   </filter>
 
   <!-- AttestationMetadata (AttestationMetadataFilter) over PingFederate's own two discovery documents (plan item S-4,
-       F-0115). ABCA-10 section 6.1: an authorization server that offers a challenge endpoint and supports RFC 8414
+       F-0115). ABCA-11 section 6.1: an authorization server that offers a challenge endpoint and supports RFC 8414
        metadata "MUST signal support for the challenge endpoint by including the metadata entry challenge_endpoint";
        section 8 asks the same documents for attest_jwt_client_auth and its algorithm members. PingFederate 13.1.3 serves
        both documents from its controller servlet (exact <servlet-mapping>s in the stock web.xml, verified 2026-10-01) and
@@ -278,5 +278,22 @@
        consumer's war with metadata-complete="true" would silently drop an annotated one. The listener also
        checks that its copy of platform is the war's own before it touches it. -->
   <listener class="com.pingidentity.ps.oidf.platform.pf.lifecycle.LifecycleListener"/>
+
+  <!-- The agent registry's bootstrap (X-A22, servlets/attestation-issuer): configures the attester's agent registry -
+       off, in memory or in a database, by OIDF_AGENT_REGISTRY_MODE - as a part of ATTESTATION_ISSUER. Declared after
+       LifecycleListener, because the container notifies listeners in this order and before any filter or servlet
+       starts (Jakarta Servlet 6.0, read 2026-10-08: 8.2.3, "Implementations of jakarta.servlet.ServletContextListener
+       are invoked at their contextInitialized method in the order in which they have been declared"; 10.12, each
+       listener's contextInitialized() before each filter's init() and each servlet's): the registry is configured on a
+       copy LifecycleListener has marked as the webapp's and swept, and before AttestationIssuanceServlet
+       (load-on-startup 1) and the metadata servlets start. Registered by name, for the reason given above. -->
+  <listener class="com.pingidentity.ps.oidf.servlet.attestation.AgentRegistryListener"/>
+
+  <!-- The device-instance registry's bootstrap (X-E11, servlets/pf-integration): publishes the Identity Object Model's
+       instance registry from OIDF_INSTANCE_REGISTRY_DATA_STORE_ID (or OIDF_INSTANCE_REGISTRY_JDBC_URL in development),
+       as a part of ATTESTATION_AUTH, for the token endpoint's revocation check and the operator API at
+       /federation/attestation/instances/*. Declared after LifecycleListener for the reason AgentRegistryListener is, and
+       so before ClientAttestationAuth's init. Registered by name, for the reason given above. -->
+  <listener class="com.pingidentity.ps.oidf.servlet.clientregistration.InstanceRegistryListener"/>
 
 </war-filters>

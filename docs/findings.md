@@ -65,7 +65,7 @@ ciba-sim ships in the production image. High, closed in 0.4.0.
 
 ### F-0015
 
-High, open; described when it closes.
+gm-api demo URLs are baked into web.xml. High, closed in 0.8.0.
 
 ### F-0016
 
@@ -243,6 +243,10 @@ Issuance endpoint: no body cap or rate limit, every PingFederate client enumerat
 
 X-Forwarded-* trusted from any proxy; CORS on the attester configuration too wide. Medium, closed in 0.6.0.
 
+### F-0062
+
+The divergence-5 sub flip is still pending. Medium, open.
+
 ### F-0063
 
 Legacy JwtCodec overloads; 27 parseUnverifiedClaims and 15 raw verifySignature() call sites unaudited. Medium, closed in 0.6.0.
@@ -261,7 +265,7 @@ The showcase's packaging statements describe the 13.0.3 build. Low, closed in 0.
 
 ### F-0067
 
-Blocker, mitigated; described when it closes.
+The CIMD resolver takes every client's bindings and trust roots from whatever OIDF_ATTESTER_CIMD_URL serves. Blocker, closed in 0.8.0.
 
 ### F-0068
 
@@ -293,7 +297,7 @@ The RAR plugin logs through java.util.logging, which PingFederate 13.1.3 writes 
 
 ### F-0084
 
-An iOS enrolment's ID token is bound to nothing, so a held token binds any key while it lasts. Medium, open.
+An iOS enrolment's ID token is bound to nothing, so a held token binds any key while it lasts. Medium, closed in 0.8.0.
 
 ### F-0085
 
@@ -353,7 +357,7 @@ Behind a proxy, every caller shares one challenge allowance: the cap counts remo
 
 ### F-0117
 
-The federation's oauth_client_attester metadata carries only the attester's keys, not its endpoints. Low, open.
+The federation's oauth_client_attester metadata carries only the attester's keys, not its endpoints. Low, closed in 0.8.0.
 
 ### F-0118
 
@@ -381,7 +385,7 @@ Lifecycle starts its own short-lived closer threads outside platform.exec. Low, 
 
 ### F-0140
 
-SPIRE selectors from an unauthenticated HTTP read ride into signed attestations. Medium, open.
+SPIRE selectors from an unauthenticated HTTP read ride into signed attestations. Medium, closed in 0.8.0.
 
 ### F-0145
 
@@ -389,7 +393,7 @@ The conformance matrices declare no row for 65 of the 500 @Requirement ids, so t
 
 ### F-0150
 
-The ldm SSF store reads a stream's updatedAt back as the database's time of its last write. Low, accepted.
+The ldm SSF store reads a stream's updatedAt back as the database's time of its last write. Low, closed in 0.8.0.
 
 ### F-0160
 
@@ -537,7 +541,7 @@ Documents outside XD01's files still describe services/demo-rs as the resource-s
 
 ### F-0230
 
-attestation_asserted_context_resolver is never read off a PingFederate client, so asserted context cannot be turned on there. Medium, open.
+attestation_asserted_context_resolver is never read off a PingFederate client, so asserted context cannot be turned on there. Medium, closed in 0.8.0.
 
 ### F-0231
 
@@ -561,7 +565,7 @@ A wrong SSF setting turns the transmitter off at INFO, often without naming the 
 
 ### F-0238
 
-gm-api's AUTHZEN_BASE_URL and GM_AUDIENCE are never read from the shipped war. Medium, open.
+gm-api's AUTHZEN_BASE_URL and GM_AUDIENCE are never read from the shipped war. Medium, closed in 0.8.0.
 
 ### F-0245
 
@@ -629,7 +633,7 @@ A change to a client's attestation properties takes up to 30 s to apply, and the
 
 ### F-0305
 
-High, open; described when it closes.
+Device-enrolment key proofs without iat can be replayed after the 300 s jti window. High, closed in 0.8.0.
 
 ### F-0306
 
@@ -857,15 +861,15 @@ The Entity Configuration's openid_provider block replaces PingFederate's method 
 
 ### F-0411
 
-The attester's discovery document names only attest_jwt_client_auth as the token endpoint's method. Low, open.
+The attester's discovery document names only attest_jwt_client_auth as the token endpoint's method. Low, closed in 0.8.0.
 
 ### F-0412
 
-The Entity Configuration's openid_provider block asks every federation client for a client attestation. Low, open.
+The Entity Configuration's openid_provider block asks every federation client for a client attestation. Low, closed in 0.8.0.
 
 ### F-0413
 
-The discovery documents advertise attestation while ATTESTATION_AUTH is refused at start-up. Low, open.
+The discovery documents advertise attestation while ATTESTATION_AUTH is refused at start-up. Low, closed in 0.8.0.
 
 ### F-0415
 
@@ -965,11 +969,11 @@ A flood of enrolment proofs fills device enrolment's in-memory replay cache and 
 
 ### F-0510
 
-The Identity Object Model's readers outside the component lifecycle start without checking the model's ledger. Low, open.
+The Identity Object Model's readers outside the component lifecycle start without checking the model's ledger. Low, closed in 0.8.0.
 
 ### F-0511
 
-Identity Object Model databases built outside the model's migrations have no ledger rows, so their ldm SSF store is FAILED_CONFIG after upgrading to 0.7.0. Medium, open.
+Identity Object Model databases built outside the model's migrations have no ledger rows, so their ldm SSF store is FAILED_CONFIG after upgrading to 0.7.0. Medium, closed in 0.8.0.
 
 ### F-0515
 
@@ -1017,7 +1021,7 @@ On the ldm and in-memory SSF stores the receiver's inbox is per node and not dur
 
 ### F-0551
 
-The SSF receiver acts on SETs in the order it received them, not by their event_timestamp. Low, open.
+The SSF receiver acts on SETs in the order it received them, not by their event_timestamp. Low, closed in 0.8.0.
 
 ### F-0555
 
@@ -1025,7 +1029,7 @@ On the ldm SSF store a stream's activity, run of failures and who paused it are 
 
 ### F-0556
 
-A SET queued at the instant a stream-updated SET is queued on an empty queue can go out before it. Low, open.
+A SET queued at the instant a stream-updated SET is queued on an empty queue can go out before it. Low, closed in 0.8.0.
 
 ### F-0557
 
@@ -1033,7 +1037,7 @@ The SSF stream lease contract tests timed leases on the wall clock with sleeps a
 
 ### F-0558
 
-An event raised as its stream is disabled can be queued after the disable's purge, and is held. Low, mitigated.
+An event raised as its stream is disabled can be queued after the disable's purge, and is held. Low, closed in 0.8.0.
 
 ### F-0560
 
@@ -1111,17 +1115,297 @@ main has no branch protection or ruleset, because the private repository is on G
 
 oidf-db-migrate.jar is not reproducible between the release's verify build and its rebuild, so the release stops at its byte comparison. High, closed in 0.7.0.
 
+### F-0610
+
+The outbound address rule let through RFC 6890 special-use blocks the CIMD draft says a fetch must not reach. Medium, closed in 0.8.0.
+
+### F-0620
+
+A federation entity can bind only one instance to a client, and never sets a client-level ceiling. Medium, closed in 0.8.0.
+
+### F-0621
+
+Federation and CIMD clients are granted whatever ceiling their source declares, with no operator cap. Medium, closed in 0.8.0.
+
+### F-0625
+
+Any attestation client's configuration can name any transit key the attester's OpenBao token can use, a hosted agent's federation key among them. Medium, closed in 0.8.0.
+
+### F-0626
+
+Inline attester private keys are accepted in production. Medium, closed in 0.8.0.
+
+### F-0627
+
+A rotated attester transit key is not used until PingFederate restarts. Low, closed in 0.8.0.
+
+### F-0628
+
+Nothing checks that the keys the attester signs with are the keys it publishes, or that they build, before the first issuance. Low, closed in 0.8.0.
+
+### F-0630
+
+A wallet instance attestation verified under the provider leaf's own keys, before metadata policy, with an attester and a Federation Entity Keys fallback. High, closed in 0.8.0.
+
+### F-0631
+
+A wallet instance attestation's typ was optional, three unregistered typ values were accepted, and nbf and a future iat were never checked. Medium, closed in 0.8.0.
+
+### F-0632
+
+A wallet client needed no provider pin, and the static wallet provider map was allowed in production and skipped a bad entry without a word. Medium, closed in 0.8.0.
+
+### F-0633
+
+Every instance of one wallet type became one agent, because the WIA sub a conformant provider issues is shared by the wallet type. High, closed in 0.8.0.
+
+### F-0634
+
+The wallet path requires an aud no specification defines for a WIA, and has no X.509 (x5c) path where HAIP 1.0 requires one. Medium, accepted.
+
+### F-0635
+
+A wallet instance attestation its provider has revoked was accepted until its exp, because no Token Status List was read. Medium, closed in 0.8.0.
+
+### F-0643
+
+Dependabot bumps no image digest the SPIRE reader's image or the rig's SPIRE overlay pins. Low, open.
+
+### F-0646
+
+A cimd-split prefix written as an exact id also admits every path below it. Low, open.
+
+### F-0655
+
+The asserted context fails open - no asserted_context, a malformed one or a directory that cannot be read all mint the evidenced ceiling unnarrowed. High, closed in 0.8.0.
+
+### F-0656
+
+The asserted context is not bound to the verified identity - any evidenced workload of an opted-in client can assert any directory oid. High, closed in 0.8.0.
+
+### F-0660
+
+challengeEndpointEnabled=false hides the attester's challenge_endpoint, but the challenge endpoint keeps serving. Low, closed in 0.8.0.
+
+### F-0661
+
+The client attestation service document's endpoints leave out the war's context path. Low, open.
+
+### F-0662
+
+/.well-known/client-attester reads agent_id support from the registry holder, not the listener's mode. Low, open.
+
+### F-0663
+
+The attester's discovery documents can be cached for up to an hour with no validator, including the fallback. Low, open.
+
+### F-0670
+
+A Trust Mark its issuer signed before rotating its key is rejected, because only the issuer's current keys are tried. Low, open.
+
+### F-0671
+
+The policy decision point is never asked at suspend, reactivate, revoke, re-key, Trust Mark grant or mint, or resolve. Low, open.
+
+### F-0672
+
+Whether and how the policy decision point is asked is set only for the whole deployment, never per client. Low, open.
+
+### F-0673
+
+A federation client's renewal rebuilds every extended property from the relying party's metadata, dropping what an operator set by hand. Low, open.
+
+### F-0674
+
+pf-integration's mutation profile cannot run on main - 28 tests fail under pitest's coverage run though they pass under surefire. Low, open.
+
+### F-0675
+
+A self-signed hosted entity works only in memory - the JDBC registry refuses to store it, so a self-signed enrolment on a database answers 500. Medium, closed in 0.8.0.
+
+### F-0676
+
+A self-signed hosted entity cannot be re-keyed - rotate-key takes only a hosting key, so a lost device key means a new Entity Identifier. Low, closed in 0.8.0.
+
+### F-0677
+
+HostingMode's javadoc and the federation README still said SELF_SIGNED was not yet implemented. Low, closed in 0.8.0.
+
+### F-0678
+
+The resolve endpoint kept answering for a suspended, revoked or re-keyed hosted agent from its response cache for up to a minute. Medium, closed in 0.8.0.
+
+### F-0679
+
+PingFederate keeps issuing tokens to a hosted agent it has suspended or revoked until the agent's automatic registration expires. Medium, closed in 0.8.0.
+
 ### F-0695
 
 SSF, attestation and Redis watchdog tests measured the build machine's speed and failed on a loaded CI runner. Low, closed in 0.7.0.
+
+### F-0696
+
+Postgres-backed tests open an unpooled connection inside the store's 10 s operation budget, so a starved database VM fails them. Low, open.
+
+### F-0700
+
+Grant Management accepts sender-constrained tokens without proof of possession. High, closed in 0.8.0.
+
+### F-0701
+
+Inbound HTTP request bodies have no byte limit. High, closed in 0.8.0.
+
+### F-0702
+
+Device-enrolment routes accept wrong methods and prefix paths. Medium, closed in 0.8.0.
+
+### F-0703
+
+Device-enrolment queues work without a bound and leaves workers running. Medium, closed in 0.8.0.
 
 ### F-0708
 
 age 1.3.2's release binaries are built with go1.27.0, whose standard library carries two CRITICAL and eight HIGH advisories, and fail the image scan. Low, closed in 0.7.0.
 
+### F-0709
+
+Three SSF tests fail on timing, not on behaviour, and turn unrelated pull requests red. Low, open.
+
+### F-0710
+
+Build's reference-data-tier job fails on any runner that has not already installed PingFederate's jars. Low, closed in 0.8.0.
+
+### F-0711
+
+ciba-sim's directory test fails on macOS, where a path below a file is reported as missing. Low, closed in 0.8.0.
+
+### F-0712
+
+The attester's transit signer cache keeps a refused version for its refresh interval and has no single-flight when cold. Low, open.
+
+### F-0713
+
+A cold CIMD resolve fetches every other cold client first, so one unreachable host delays them all. Low, open.
+
+### F-0714
+
+A compromised SPIRE entry reader can mint any identity in the trust domain while SPIRE's read policy is optional. Medium, open.
+
+### F-0720
+
+Attestation issuer served a trust bundle fetched by URL indefinitely after its re-fetches failed. High, closed in 0.8.0.
+
+### F-0721
+
+An unauthenticated token naming an unknown kid made device-enrolment fetch PingOne's JWKS on every request. Medium, closed in 0.8.0.
+
+### F-0722
+
+The PingOne ID-token and SPIFFE JWT-SVID verifiers, and four other hand-rolled JWT checks, accepted tokens before their nbf. Low, closed in 0.8.0.
+
+### F-0723
+
+A first device enrolment minted an attestation after the owner's user verification had already expired. Medium, closed in 0.8.0.
+
+### F-0725
+
+Client attestation's spec citations and decision records name draft-10, and several quote text -11 changed. Low, closed in 0.8.0.
+
+### F-0730
+
+A use_attestation_challenge refusal carries no challenge, which ABCA-11 §6.1 requires. Medium, closed in 0.8.0.
+
+### F-0731
+
+Combined mode refuses a missing or stale DPoP nonce with use_attestation_challenge instead of use_dpop_nonce. Medium, closed in 0.8.0.
+
+### F-0732
+
+In combined mode the filter's DPoP nonce and PingFederate's own are two issuers, so a generic DPoP client loops when both are required. Low, closed in 1.0.0.
+
+### F-0735
+
+A required-claim name the verifier does not know is treated as satisfied, the attestation typ is fixed, and no refusal uses invalid_client_attestation. Medium, closed in 0.8.0.
+
+### F-0736
+
+A federation client's attestation_accepted_typs is lost at its next renewal, widening it back to the deployment's typ list. Low, closed in 0.8.0.
+
+### F-0740
+
+A client attestation without iss, as ABCA-11 §4 defines it, is refused. Medium, closed in 0.8.0.
+
+### F-0745
+
+PingFederate's own dpop_signing_alg_values_supported can differ from the combined-mode DPoP algorithms the filter accepts. Low, open.
+
+### F-0746
+
+ABCA-11 section 9 client metadata is checked at registration but does not narrow the client's attestation policy. Low, closed in 1.0.0.
+
+### F-0750
+
+A client attestation can be presented any number of times within its lifetime, with no way to require single use. Low, closed in 0.8.0.
+
+### F-0755
+
+Any attester whose trust chain validates is trusted, with no way to require a Trust Mark. Medium, closed in 0.9.0.
+
+### F-0760
+
+The authorization server ignores the key-storage and user-authentication levels an attestation asserts. Medium, closed in 0.9.0.
+
+### F-0767
+
+A refresh token issued under attest_jwt_client_auth is not bound to the client instance key, so another instance of the client can refresh it. Medium, closed in 0.9.0.
+
+### F-0770
+
+A suspended or revoked client instance keeps authenticating at the token endpoint until its attestation expires. Medium, closed in 0.8.0.
+
+### F-0771
+
+A device instance can be suspended or revoked only in the database or by a CAEP event, with no operator API. Low, closed in 0.8.0.
+
+### F-0772
+
+Tokens already issued to a client instance stay valid after it is revoked. Medium, open.
+
+### F-0773
+
+The node that takes a revocation keeps its own remembered active answer while the cache is on. Low, closed in 0.9.0.
+
+### F-0775
+
+A verifier that cannot read the registers cannot see that a client instance was revoked before its attestation expires. Medium, closed in 0.9.0.
+
+### F-0776
+
+The Identity Object Model has no constraint or index on a device instance's status list index. Low, open.
+
+### F-0780
+
+Nothing tells a receiver when a device instance or workload agent is suspended or revoked. Medium, closed in 0.9.0.
+
+### F-0785
+
+A SCIM provisioning system cannot read or revoke agent instances. Low, closed in 0.9.0.
+
+### F-0790
+
+Refresh-token rotation dropped the old token's binding, so another instance could redeem it in PingFederate's grace period. Medium, closed in 0.9.0.
+
+### F-0791
+
+The in-memory refresh-token binding store evicted bindings when full, turning bound tokens into unknown ones. Medium, closed in 0.9.0.
+
+### F-0792
+
+A token response with a Content-Encoding went out with its refresh token unbound. Low, closed in 0.9.0.
+
 ### U-0004
 
-The 13.1.3 client-authentication model the federation's clients report. Unverified item, open.
+The 13.1.3 client-authentication model the federation's clients report. Unverified item, closed.
 
 ### U-0009
 
@@ -1206,6 +1490,18 @@ RFC 9449 sections 4.3 and 11.1. Unverified item, closed.
 ### U-0038
 
 RFC 7662 cnf. Unverified item, closed.
+
+### U-0040
+
+HAIP and WIA typ and aud, the Token Status List draft, and the CIMD draft's URL rules. Unverified item, open.
+
+### U-0048
+
+SPIRE ListEntries filters and paging, admin-socket behaviour, an authorisation policy for the admin socket. Unverified item, closed.
+
+### U-0049
+
+grpc-java over a Unix domain socket with Netty epoll. Unverified item, closed.
 
 ### U-0050
 
@@ -1554,3 +1850,59 @@ Whether the federation-op plan runs on the Linux runner with the suite reached a
 ### U-0601
 
 Whether a client written through MgmtFactory on one engine reaches the other engine and survives console replication. Unverified item, open.
+
+### U-0604
+
+Applicability of advisories against the PF-provided Jackson and Log4j versions. Unverified item, accepted.
+
+### U-0610
+
+Whether PingFederate takes an https URL with a path as a client id that authenticates through the attestation filter. Unverified item, open.
+
+### U-0615
+
+Whether any deployment still sets OIDF_ATTESTER_CIMD_URL, which 0.8.0 refuses. Unverified item, closed.
+
+### U-0625
+
+What OpenBao transit does with a pinned key version after a rotation and after min_encryption_version or a trim passes it. Unverified item, closed.
+
+### U-0626
+
+Who configures an inline attester key or a transit key ref today, and so breaks under the 0.8.0 signing-key rules. Unverified item, closed.
+
+### U-0640
+
+Whether a read-only mount of SPIRE Server's API socket stops writes, and what SPIRE's caller_file_path needs. Unverified item, closed.
+
+### U-0643
+
+Who SPIRE Server's API socket admits in the published images, and what the SPIRE reader's image runs as. Unverified item, closed.
+
+### U-0645
+
+What PingFederate's KeyAccessor.getClientSslKeypair answers on the rig, and whether a rotated key pair shows up. Unverified item, open.
+
+### U-0655
+
+What an attestation with empty or absent authorization_details means at the token gate and in the RAR plugin. Unverified item, open.
+
+### U-0656
+
+AKS service-account evidence proves no tenant, so it can assert an Entra agent only through a development entry with no tenant. Unverified item, open.
+
+### U-0670
+
+Whether any federation peer the conformance suite runs publishes historical keys, to test against a real response. Unverified item, closed.
+
+### U-0680
+
+Whether PostgreSQL takes the stream row's FOR SHARE lock in the fan-out insert before it draws the queued SET's seq default. Unverified item, closed.
+
+### U-0766
+
+Whether PingFederate should return a fresh attestation challenge on successful attested responses, as clients that reuse one expect. Unverified item, closed.
+
+### U-0770
+
+Client revocation at the token endpoint has not been driven end to end on the rig. Unverified item, open.

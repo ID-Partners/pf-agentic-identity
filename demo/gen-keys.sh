@@ -5,15 +5,17 @@
 # clients (the plan needs a second one to prove a code or a token is bound to the first), one SSF
 # receiver and two CIBA clients - and, for the OpenID Federation OP plan, the suite's own trust anchor,
 # its relying party's entity keys and that RP's client keys. PF holds only the PUBLIC half
-# (terraform/clients.tf reads keys/*.public.jwks.json; the federation-op profile pins the anchor's); the
+# (the conformance profiles' material block names keys/*.public.jwks.json, which tools/profile.py reads
+# when it authors; the federation-op profile pins the anchor's); the
 # private half goes into the suite configuration and nowhere else. Then an mTLS CA with two client
 # certificates the FAPI-CIBA plan's configuration insists on, a TLS CA and certificate for a suite run
 # with suite/suite-compose.yml, and secrets.env: the test user's password and two client secrets (the SSF
-# introspection client's and the event operator's). Nothing written here is committed.
+# introspection client's and the event operator's). For the fapi2-attestation plan, the suite's attester key and
+# two bridge keys, with the two files PF reads for it (below). Nothing written here is committed.
 #
 # And PingFederate's own runtime certificate (F-0362): a CA, pf-runtime-tls-ca, and a leaf, pf-runtime-tls,
-# naming localhost, host.docker.internal, $PF_RIG_NAME and the host of $PF_BASE_URL, which terraform/
-# runtime-tls.tf imports as the runtime (and admin) server certificate, with the CA in PingFederate's trusted CAs. A
+# naming localhost, host.docker.internal, $PF_RIG_NAME and the host of $PF_BASE_URL, which the profile's
+# material.runtime_tls hands deploy/terraform/modules/base to import as the runtime (and admin) server certificate, with the CA in PingFederate's trusted CAs. A
 # module in PingFederate that calls PingFederate at its own issuer then checks the host name against a certificate
 # that carries it, with no JDK switch. The leaf is reissued when the names
 # change - another rig name or issuer - and kept otherwise; the CA is kept.
@@ -29,7 +31,9 @@ command -v node >/dev/null || { echo "ERROR: node is required (it exports JWKs n
 
 # The suite-* keys are the suite's own federation, for the OpenID Federation OP plan: its trust anchor, its RP's
 # entity keys and its RP's client keys. The suite signs with the private halves; PF pins the anchor's public half.
-for name in fapi2-client1 fapi2-client2 ssf-receiver ciba-client1 ciba-client2 suite-trust-anchor suite-rp-ec suite-rp-client; do
+# cimd-spiffe is the CIMD profile's SPIFFE trust root (its JWT-SVID signer) and cimd-client its client's bridge key.
+for name in fapi2-client1 fapi2-client2 ssf-receiver ciba-client1 ciba-client2 suite-trust-anchor suite-rp-ec suite-rp-client \
+    cimd-spiffe cimd-client fapi2-attest-client1 fapi2-attest-client2; do
   if [[ -f "$KEYS/$name.private.jwks.json" ]]; then
     echo "kept      keys/$name.*"
     continue
@@ -93,6 +97,58 @@ else
   echo "generated keys/suite-tls-* (a CA and the suite's certificate)"
 fi
 
+# --- The fapi2-attestation plan (X-E09): the suite as attester, PingFederate bridging to private_key_jwt ---
+# suite-attester is the attester the suite signs its Client Attestation JWTs with (client_attestation.attester_jwks):
+# an EC P-256 key whose JWK carries x5c, because the suite puts the attester's certificate in the JWT's header and
+# refuses a key without one. PF trusts its public half directly (oidf.mock.attesters), with no federation behind it.
+if [[ -f "$KEYS/suite-attester.private.jwks.json" ]]; then
+  echo "kept      keys/suite-attester.*"
+else
+  ( umask 177; cd "$KEYS"
+    openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 397 -keyout suite-attester.key \
+      -out suite-attester.crt -subj "/CN=pf-agentic-identity conformance suite attester" >/dev/null 2>&1
+    # The ${...} below are JavaScript template literals, expanded by node and not by the shell.
+    # shellcheck disable=SC2016
+    KEYS_DIR="$KEYS" node -e '
+      const { createPrivateKey, X509Certificate, createHash } = require("crypto");
+      const fs = require("fs");
+      const dir = process.env.KEYS_DIR;
+      const priv = createPrivateKey(fs.readFileSync(`${dir}/suite-attester.key`)).export({ format: "jwk" });
+      const cert = new X509Certificate(fs.readFileSync(`${dir}/suite-attester.crt`));
+      const pub = { kty: priv.kty, crv: priv.crv, x: priv.x, y: priv.y };
+      const kid = createHash("sha256").update(JSON.stringify({ crv: pub.crv, kty: pub.kty, x: pub.x, y: pub.y })).digest("base64url");
+      const meta = { kid, use: "sig", alg: "ES256", x5c: [cert.raw.toString("base64")] };
+      fs.writeFileSync(`${dir}/suite-attester.private.jwks.json`, JSON.stringify({ keys: [{ ...priv, ...meta }] }, null, 2));
+      fs.writeFileSync(`${dir}/suite-attester.public.jwks.json`, JSON.stringify({ keys: [{ ...pub, ...meta }] }, null, 2));
+    '
+    rm -f suite-attester.key suite-attester.crt )
+  chmod 644 "$KEYS/suite-attester.public.jwks.json"
+  echo "generated keys/suite-attester.*"
+fi
+# fapi2-attest-client1/2 (in the loop above) are the bridge keys of the two clients the suite authenticates by
+# attestation: PF holds their public halves as the clients' JWKS and signs the private_key_jwt it forwards with the
+# private halves. Neither leaves PF; the suite never sees them. The two files PF reads for the plan are derived here,
+# every time, from the keys: the attesters it trusts and each client's bridge key bound to the suite's attester.
+ATTESTER_ISSUER="https://suite-attester.rig.example"
+( umask 177
+  # shellcheck disable=SC2016
+  KEYS_DIR="$KEYS" ISSUER="$ATTESTER_ISSUER" node -e '
+    const fs = require("fs");
+    const dir = process.env.KEYS_DIR, iss = process.env.ISSUER;
+    const read = (name) => JSON.parse(fs.readFileSync(`${dir}/${name}`));
+    fs.writeFileSync(`${dir}/fapi2-attestation-mock-attesters.json`,
+      JSON.stringify({ [iss]: read("suite-attester.public.jwks.json") }, null, 2));
+    const bridge = {};
+    for (const n of ["client1", "client2"]) {
+      bridge[`conformance-fapi2-attest-${n}`] = { jwk: read(`fapi2-attest-${n}.private.jwks.json`).keys[0], attesters: [iss] };
+    }
+    fs.writeFileSync(`${dir}/fapi2-attestation-bridge-keys.json`, JSON.stringify(bridge, null, 2));
+  ' )
+# Both readable by any user, so PingFederate (uid 9031 in its container) can read them through a bind mount on a Linux
+# host too; keys/ itself stays 700, so no other user on this machine reaches the bridge keys.
+chmod 644 "$KEYS/fapi2-attestation-mock-attesters.json" "$KEYS/fapi2-attestation-bridge-keys.json"
+echo "derived   keys/fapi2-attestation-{mock-attesters,bridge-keys}.json"
+
 # --- PingFederate's runtime certificate (F-0362) ---
 RIG_NAME="${PF_RIG_NAME:-pf-agentic-identity}"
 BASE_HOST="${PF_BASE_URL:-https://localhost:9031}"; BASE_HOST="${BASE_HOST#https://}"; BASE_HOST="${BASE_HOST%%/*}"
@@ -135,7 +191,7 @@ else
   ( umask 177
     rand() { openssl rand -base64 36 | tr -d '/+=\n' | cut -c1-"$1"; }
     {
-      echo "# Generated by gen-keys.sh. Never committed. Sourced by apply.sh as TF_VAR_*."
+      echo "# Generated by gen-keys.sh. Never committed. Read by tools/profile.py author (TF_VAR_ prefix allowed)."
       echo "TF_VAR_test_user_password=$(rand 24)"
       echo "TF_VAR_ssf_introspection_client_secret=$(rand 40)"
       echo "TF_VAR_ssf_emitter_client_secret=$(rand 40)"
@@ -147,6 +203,11 @@ fi
 if ! grep -q '^TF_VAR_ssf_emitter_client_secret=' "$SECRETS"; then
   ( umask 177; echo "TF_VAR_ssf_emitter_client_secret=$(openssl rand -base64 36 | tr -d '/+=\n' | cut -c1-40)" >> "$SECRETS" )
   echo "added     TF_VAR_ssf_emitter_client_secret to secrets.env"
+fi
+# The federation operator client's secret (FederationSmokeHarness live, Phase 5 L01B): appended as above.
+if ! grep -q '^TF_VAR_federation_operator_client_secret=' "$SECRETS"; then
+  ( umask 177; echo "TF_VAR_federation_operator_client_secret=$(openssl rand -base64 36 | tr -d '/+=\n' | cut -c1-40)" >> "$SECRETS" )
+  echo "added     TF_VAR_federation_operator_client_secret to secrets.env"
 fi
 # The runtime certificate's PKCS#12 password follows the file: rewritten whenever the certificate was reissued.
 ( umask 177

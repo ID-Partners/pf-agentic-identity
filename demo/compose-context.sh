@@ -3,7 +3,7 @@
 #
 # The image build is ../build/pingfederate/ here, ../image/ in the public tree (Dockerfile, war assembly and
 # the filters it declares, entrypoint, staged module jars and the staged war assembler; layout.sh says which);
-# this directory owns what configures it: the archive export.sh produced and the cipher-list overlay.
+# this directory owns what configures it: the archive up.sh authored (tools/profile.py author) and the cipher-list overlay.
 # `docker build` (and a deploy tool such as `railway up`) want one directory, so this assembles
 # .context/ (git-ignored) and prints its path.
 #
@@ -28,7 +28,7 @@ esac
 # The war assembler the Dockerfile runs, which stage-modules.sh and stage-from-release.sh stage beside modules/.
 [[ -f "$BUILD/assembler/war-assembler.jar" ]] || { echo "ERROR: no staged war assembler at $BUILD/assembler - run $STAGE_HINT" >&2; exit 1; }
 for f in data.zip overlay/pf.jwk overlay/pingfederate-system-keys.xml; do
-  [[ -f "$HERE/$f" ]] || { echo "ERROR: missing $f - run ./export.sh" >&2; exit 1; }
+  [[ -f "$HERE/$f" ]] || { echo "ERROR: missing $f - run ./up.sh (without SKIP_AUTHOR) to author it" >&2; exit 1; }
 done
 
 CTX="$HERE/.context"

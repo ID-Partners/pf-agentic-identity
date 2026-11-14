@@ -1,0 +1,15 @@
+# The conformance rig for the suite's OpenID Federation deployed-entity plan (conformance/vars.federation.env until
+# phase 3): PingFederate as its own trust anchor and trust controller, so its entity configuration says it is a trust
+# anchor and publishes fetch, list and resolve. Its keys are PF's own, read whenever a chain is checked, so nothing is
+# pinned before PF has booted. Attestation stays off.
+profile: conformance-federation
+description: The conformance rig for the OpenID Federation deployed-entity plan, PF as its own trust anchor
+extends: conformance-fapi2
+features:
+  federation:
+    auto_registration: true
+    hosting: true
+    self_anchor: true
+    organization_name: pf-agentic-identity conformance rig
+conformance:
+  plan: federation

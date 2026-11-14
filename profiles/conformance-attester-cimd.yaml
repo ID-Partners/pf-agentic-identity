@@ -1,0 +1,20 @@
+# The attester's CIMD source (conformance/vars.attester-cimd.env until phase 3, X-B02): one CIMD client, listed by the
+# operator, whose Client ID Metadata Document conformance/cimd/serve.sh serves over https at the client's URL. The trust
+# root is the operator's (keys/cimd-spiffe, which gen-keys.sh writes). REL5 runs it end to end, and records what
+# PingFederate does with a client id that is an https URL (U-0610).
+profile: conformance-attester-cimd
+description: The conformance rig with the attester's CIMD source, one client served by cimd/serve.sh
+extends: conformance-fapi2
+features:
+  attestation: { auth: false, issuer: true }
+material:
+  jwks: { cimd-client: cimd-client.public.jwks.json }
+conformance:
+  plan: attester-cimd
+  cimd_client_id: https://host.docker.internal:57443/agents/payments
+env:
+  OIDF_ATTESTATION_ISSUER_ENABLED: "true"
+  OIDF_CIMD_CLIENTS: '{"https://host.docker.internal:57443/agents/payments": {"issuer": "https://localhost:9031", "trust_root": "rig-spiffe", "subject_prefixes": ["spiffe://rig.example/payments/"], "max_issued_ttl": 300}}'
+  OIDF_CIMD_TRUST_BUNDLES: '{"rig-spiffe": {"trust_domain": "rig.example", "jwks": {{PUBLIC_JWKS:cimd-spiffe}}}}'
+  # The document server is on this machine, reached as host.docker.internal; the fetch has no other exemption.
+  OIDF_FETCH_HOST_ALLOWLIST: host.docker.internal

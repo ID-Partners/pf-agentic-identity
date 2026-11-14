@@ -9,7 +9,7 @@
 #                `docker build` with no --target builds it, as it did before the targets existed
 #
 # Build-context artifacts required here (see README.md in this directory):
-#   data.zip.age (preferred) or data.zip  <- the config archive (produced by terraform/ export); deployment only
+#   data.zip.age (preferred) or data.zip  <- the config archive (produced by tools/profile.py author); deployment only
 #   overlay/config-store/org.sourceid.saml20.domain.mgmt.impl.DataDeployer.xml   deployment only
 #   overlay/pf.jwk, overlay/pingfederate-system-keys.xml   only under the plaintext scheme (SECRET, git-ignored)
 #   modules/                         <- stage-modules.sh output of this repo's reactor, staged for the
@@ -137,9 +137,9 @@ RUN /age/age --version && /age/age-keygen --version
 # the version here and in the BOM, and the sum.
 FROM pingfederate AS pgjdbc
 USER root
-ARG PGJDBC_VERSION=42.7.13
+ARG PGJDBC_VERSION=42.7.14
 RUN case "$PGJDBC_VERSION" in \
-      42.7.13) sum=6e0e4cc2d8cae902084f8a2b18728b073a6fd9d1f87c9d8bff8f298c18185b93 ;; \
+      42.7.14) sum=73914527305a40cce504b0d3d90b23caf565136912d607ae8ae7c5895512332c ;; \
       *) echo "ERROR: no checksum recorded for PgJDBC '$PGJDBC_VERSION'" >&2; exit 1 ;; \
     esac \
  && mkdir /pgjdbc \
@@ -197,7 +197,7 @@ RUN cp /tmp/modules/*.jar /opt/in/instance/server/default/deploy/ \
 # The CIBA simulator's decision directory, conformance profile only. plugins/ciba-sim refuses every
 # request unless OIDF_CIBA_SIM_DIR names a directory that exists, is not a symlink, is owned by the user
 # PingFederate runs as and is 0700: it is the handoff between the plugin's two classloaders, and anyone
-# else who could write to it could approve a request. Made here so the rig's vars.env can simply name
+# else who could write to it could approve a request. Made here so the rig's environment can simply name
 # it; outside /opt/out, which the base image's bootstrap populates by copying without preserving modes.
 # A production image has neither the jar nor the directory.
 RUN if [ "$STAGING_PROFILE" = conformance ]; then \

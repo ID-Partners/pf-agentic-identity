@@ -1,0 +1,8 @@
+# The conformance rig for the suite's FAPI-CIBA plan, ping mode: its CIBA clients are told to expect a ping at the
+# suite's notification endpoint.
+profile: conformance-ciba-ping
+description: The conformance rig for the FAPI-CIBA plan in ping mode
+extends: conformance-fapi2
+conformance:
+  plan: ciba-ping
+  ciba: { delivery_mode: PING }

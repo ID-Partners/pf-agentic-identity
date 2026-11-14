@@ -10,7 +10,7 @@
 # DIR/NAME.crt and DIR/NAME.key for each NAME: reissued when its SAN list changes (DIR/NAME.sans records it), kept
 #   otherwise. A SAN that is all digits and dots is an IP address, anything else a DNS name.
 # DIR/NAME.p12 and DIR/NAME.p12.pass for the leaf named pf: PingFederate imports its server certificate as
-#   PKCS#12 (reference/terraform's runtime certificate).
+#   PKCS#12 (the profile's material.runtime_tls, deploy/terraform/modules/base's runtime certificate).
 #
 # Keys are 0600, certificates 0644, DIR 0700. Nothing is printed but the names of what was made or kept.
 set -euo pipefail

@@ -1,0 +1,230 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/ID-Partners/pf-agentic-identity/tools/profile/schema.json",
+  "title": "Agentic IdP deployment profile",
+  "description": "profiles/<name>.yaml, after its extends chain is merged. tools/profile.py validates it with the subset of JSON Schema this file uses (type, properties, required, additionalProperties, enum, items, pattern, minLength, minItems, uniqueItems, minimum, maximum, $ref); keep to that subset.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["profile", "pf", "deployment", "features"],
+  "properties": {
+    "profile": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "description": "The file's own name, without .yaml"},
+    "description": {"type": "string"},
+    "extends": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$", "description": "A profile in the same directory this one is laid over: mappings merge, anything else is replaced"},
+    "pf": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["base_url"],
+      "properties": {
+        "base_url": {"type": "string", "pattern": "^https://[^/]+$", "description": "The origin PF advertises, baked into the archive"},
+        "client_storage": {"enum": ["xml", "jdbc"], "description": "Where PF keeps its OAuth clients: xml (its own, the default) or jdbc (the postgres block's database)"},
+        "naming": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["id", "display"],
+          "properties": {"id": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9-]*$"}, "display": {"type": "string", "minLength": 1}}
+        },
+        "scopes": {
+          "type": "array",
+          "description": "Common scopes beyond the features'; left out takes modules/base's (openid, profile, email, offline_access)",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "description"],
+            "properties": {"name": {"type": "string", "minLength": 1}, "description": {"type": "string"}, "dynamic": {"type": "boolean"}}
+          }
+        },
+        "user_token_mapping": {"type": "boolean"},
+        "openid_connect": {"type": "boolean"},
+        "extended_properties": {"type": "boolean", "description": "Declare docs/extended-properties.json's names (federation and attestation need them, F-0041)"},
+        "postgres": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ca_file"],
+          "properties": {
+            "host": {"type": "string"}, "port": {"type": "integer", "minimum": 1}, "database": {"type": "string"},
+            "ca_file": {"type": "string", "description": "The CA file's path inside the PF container"}
+          }
+        },
+        "smoke_client": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["client_id", "scope"],
+          "properties": {
+            "client_id": {"type": "string"}, "name": {"type": "string"}, "scope": {"type": "string"},
+            "scope_description": {"type": "string"}
+          }
+        }
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {"enum": ["development", "production"], "description": "OIDF_DEPLOYMENT_PROFILE"},
+        "accepted_risks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9-]+(@[0-9]{4}-[0-9]{2}-[0-9]{2})?$"}, "description": "OIDF_ACCEPTED_RISKS: each risky switch production must be told it accepts"}
+      }
+    },
+    "material": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Where author finds what the profile does not carry: keys, certificates and secrets, by file name under dir",
+      "properties": {
+        "dir": {"type": "string", "description": "A directory, relative to the repository root"},
+        "secrets": {"type": "string", "description": "A KEY=VALUE file (relative to the repository root) of var.secrets members, TF_VAR_ prefix allowed"},
+        "runtime_tls": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["p12"],
+          "properties": {"p12": {"type": "string"}, "key_id": {"type": "string"}}
+        },
+        "trusted_cas": {"type": "object", "additionalProperties": {"type": "string"}, "description": "CA id to a PEM or DER file name"},
+        "jwks": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Conformance client to its public JWKS file name"},
+        "config_store": {"type": "string", "description": "A directory of config-store XML staged into the authoring PF before it first starts"}
+      }
+    },
+    "features": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "fapi2": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "par": {"enum": ["required", "enabled", "disabled"]},
+            "dpop_require_nonce": {"type": "boolean"},
+            "clients": {"$ref": "#/$defs/names"},
+            "resource_clients": {"$ref": "#/$defs/names"}
+          }
+        },
+        "attestation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "auth": {"type": "boolean", "description": "attest_jwt_client_auth at the token endpoint (OIDF_ATTESTATION_AUTH_ENABLED)"},
+            "issuer": {"type": "boolean", "description": "The co-hosted attester (OIDF_ATTESTATION_ISSUER_ENABLED)"},
+            "evidence": {"type": "array", "uniqueItems": true, "items": {"enum": ["aws-sts", "eks", "aks", "azure-mi", "gke", "gcp-id-token", "spire", "cimd"]}},
+            "aws": {"type": "object", "additionalProperties": false, "properties": {"accounts": {"$ref": "#/$defs/names"}, "sts_issuers": {"$ref": "#/$defs/names"}, "eks_issuers": {"$ref": "#/$defs/names"}}},
+            "azure": {"type": "object", "additionalProperties": false, "properties": {"tenants": {"$ref": "#/$defs/names"}, "managed_identities": {"$ref": "#/$defs/names"}, "mi_issuers": {"$ref": "#/$defs/names"}, "aks_issuers": {"$ref": "#/$defs/names"}}},
+            "gcp": {"type": "object", "additionalProperties": false, "properties": {"projects": {"$ref": "#/$defs/names"}, "id_token_issuers": {"$ref": "#/$defs/names"}, "gke_issuers": {"$ref": "#/$defs/names"}}},
+            "spire": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The SPIRE entry reader the attester asks over mutual TLS (OIDF_ATTESTER_SPIRE_READER_*)",
+              "required": ["reader_url", "trust_domain", "ca_file", "client_key_pair"],
+              "properties": {
+                "reader_url": {"type": "string", "pattern": "^https://", "description": "OIDF_ATTESTER_SPIRE_READER_URL, the reader's https base URL"},
+                "trust_domain": {"type": "string", "pattern": "^[a-z0-9._-]+$", "description": "OIDF_ATTESTER_SPIRE_READER_TRUST_DOMAIN, the SPIFFE trust domain the reader serves"},
+                "ca_file": {"type": "string", "minLength": 1, "description": "OIDF_ATTESTER_SPIRE_READER_CA_FILE, the PEM file (path inside the PF container) of the CAs that issue the reader's certificate"},
+                "client_key_pair": {"type": "string", "minLength": 1, "description": "OIDF_ATTESTER_SPIRE_READER_CLIENT_KEY_PAIR, the alias of the PF SSL client key pair presented to the reader"},
+                "timeout_ms": {"type": "integer", "minimum": 100, "maximum": 10000, "description": "OIDF_ATTESTER_SPIRE_READER_TIMEOUT_MS, each read's whole deadline; left out takes 2000"},
+                "failure_mode": {"enum": ["closed", "downscope"], "description": "OIDF_ATTESTER_SPIRE_FAILURE_MODE when the reader cannot be read; left out takes closed"}
+              }
+            },
+            "cimd": {"type": "object", "additionalProperties": false, "required": ["clients", "trust_bundles"], "properties": {"clients": {"type": "object"}, "trust_bundles": {"type": "object"}}},
+            "signing_key_ref": {"type": "string", "description": "OIDF_ATTESTER_SIGNING_KEY_REF, the OpenBao transit key the attester signs with"}
+          }
+        },
+        "federation": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "auto_registration": {"type": "boolean"},
+            "hosting": {"type": "boolean"},
+            "operator_api": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {"audience": {"type": "string"}, "client": {"type": "boolean"}}
+            },
+            "self_anchor": {"type": "boolean", "description": "PF is its own trust anchor and trust controller"},
+            "trust_anchors": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["entity_id"],
+                "properties": {"entity_id": {"type": "string", "pattern": "^https://"}, "jwks": {"type": "object"}}
+              }
+            },
+            "organization_name": {"type": "string"}
+          }
+        },
+        "ciba": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["authenticator"],
+          "properties": {
+            "authenticator": {"enum": ["sim", "custom"], "description": "sim: plugins/ciba-sim, the conformance approval oracle; custom: the custom block's plugin"},
+            "custom": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["plugin_id", "name", "descriptor_id"],
+              "properties": {
+                "plugin_id": {"type": "string"}, "name": {"type": "string"}, "descriptor_id": {"type": "string"},
+                "fields": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["name", "value"], "properties": {"name": {"type": "string"}, "value": {"type": "string"}}}}
+              }
+            },
+            "transaction_lifetime": {"type": "integer", "minimum": 1}
+          }
+        },
+        "rar": {"type": "object", "additionalProperties": false, "properties": {"enabled": {"type": "boolean"}}},
+        "ssf": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "transmitter": {"type": "boolean"},
+            "receiver": {"type": "boolean", "description": "OIDF_SSF_RECEIVER_ENABLED; left out leaves it unset"},
+            "emitter": {"type": "boolean", "description": "The event operator client, holding ssf.provision"},
+            "pf_objects": {"type": "boolean", "description": "false: switch the transmitter on without modules/ssf's clients and scopes, as the reference stacks run it"},
+            "attestation_events": {
+              "type": "object",
+              "additionalProperties": false,
+              "description": "The attestation event families, each OIDF_SSF_<FAMILY>_EVENT_ENABLED; a family left out stays on",
+              "properties": {
+                "instance_registered": {"type": "boolean"},
+                "attestation_issued": {"type": "boolean"},
+                "attestation_refused": {"type": "boolean"},
+                "attester_key_rotated": {"type": "boolean"}
+              }
+            }
+          }
+        },
+        "grant_management": {"type": "object", "additionalProperties": false, "properties": {"enabled": {"type": "boolean"}}}
+      }
+    },
+    "conformance": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The conformance suites' clients, user and login form (modules/conformance-clients); test rigs only",
+      "required": ["plan"],
+      "properties": {
+        "plan": {"enum": ["fapi2", "fapi2-attestation", "ciba-poll", "ciba-ping", "ssf", "federation", "federation-op", "attester-cimd"]},
+        "suite_base_urls": {"$ref": "#/$defs/names"},
+        "suite_alias": {"type": "string"},
+        "ssf_receiver": {"type": "boolean"},
+        "ciba": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {"delivery_mode": {"enum": ["POLL", "PING"]}, "notification_suite_base_url": {"type": "string"}}
+        },
+        "cimd_client_id": {"type": "string"},
+        "fapi2_attestation": {"type": "boolean", "description": "The fapi2-attestation plan's two clients, authenticated by attest_jwt_client_auth (X-E09); needs features.attestation.auth"},
+        "attester": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["signing_key_ref", "spiffe_bundle"],
+          "description": "The PingFederate-store client that names an OpenBao transit key (docker-compose.attester-keys.yml); attester_client_secret in the secrets",
+          "properties": {"signing_key_ref": {"type": "string", "minLength": 1}, "spiffe_bundle": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "env": {
+      "type": "object",
+      "description": "Settings laid over everything the features imply, last: a string sets one, null leaves it unset. {{PF_BASE_URL}} is filled in; other {{...}} placeholders are left for whoever runs the image",
+      "additionalProperties": {"type": ["string", "null"]}
+    }
+  },
+  "$defs": {
+    "names": {"type": "array", "items": {"type": "string", "minLength": 1}}
+  }
+}

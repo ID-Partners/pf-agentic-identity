@@ -21,9 +21,20 @@ suite/*.json
 # Derived.
 .context/
 .rar-principal/
-terraform/.terraform/
-terraform/terraform.tfstate*
+.agent-registry/
+# tools/profile.py's output for the current authoring server (up.sh): the rendered inputs and environment, and the
+# Terraform state, which holds the generated secrets in plaintext.
+.profile/
+# Where apply.sh kept that state before up.sh authored through tools/profile.py.
+.author.tfstate*
 .key-rotation/
+# verify-attestation-events.sh: the JWT-SVID signer's and instance's PRIVATE JWKs, the SETs it polled, server.log.
+.attestation-events/
 
 # The licensed conformance driver's plan output and PingFederate logs (tools/ci/licensed-conformance.sh).
 out/
+
+# The SPIRE overlay's state (spire/gen-certs.sh, spire/smoke.sh): a throwaway CA and its keys, the agent's join token.
+.spire/
+# Saved conformance-suite logs (run-plan.py --save-logs .runs/...): they hold tokens and client assertions.
+.runs/

@@ -1,0 +1,21 @@
+# What services/harness FederationSmokeHarness live needs over the federation profile (PF_HARNESS=1 and
+# conformance/vars.federation-harness.env until phase 3), kept out of conformance-federation so the conformance plans
+# run against the profile they were pinned on. PF is the authority its agents are hosted under, and the operator API
+# takes the operator client's DPoP-bound tokens. The JWKS is PF's own, on the container's loopback.
+profile: conformance-federation-harness
+description: The federation rig with the operator client and API, for the federation smoke harness
+extends: conformance-federation
+features:
+  federation:
+    operator_api: { client: true }
+env:
+  OIDF_OPERATOR_API_ENABLED: "true"
+  OIDF_AUTHORITY_ENTITY_ID: "{{PF_BASE_URL}}"
+  OIDF_OPERATOR_BASE_URL: "{{PF_BASE_URL}}"
+  OIDF_OPERATOR_JWKS_URL: https://localhost:9031/pf/JWKS
+  OIDF_OPERATOR_INSECURE_TLS: "true"
+  # A registration lasts at most three minutes and the sweeper looks every thirty seconds, so the walk's last step
+  # (the client disabled once its registration ends) finishes in minutes.
+  OIDF_REGISTRATION_MIN_TTL_SECONDS: "30"
+  OIDF_REGISTRATION_MAX_TTL_SECONDS: "180"
+  OIDF_REGISTRATION_SWEEP_INTERVAL_SECONDS: "30"

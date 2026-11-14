@@ -1,0 +1,16 @@
+# The fapi2-attestation profile's two files (plan item X-E09), which up.sh lays over the rig when PF_PROFILE=fapi2-attestation:
+#
+#   PF_PROFILE=fapi2-attestation PF_BASE_URL=https://host.docker.internal:9031 ./up.sh
+#
+# keys/fapi2-attestation-mock-attesters.json is the suite's attester, trusted directly through the development-only
+# system property oidf.mock.attesters (no federation trust chain); keys/fapi2-attestation-bridge-keys.json is
+# OIDF_BRIDGE_SIGNING_KEYS, each attested client's bridge key and the attester it is bound to. gen-keys.sh derives both
+# from keys/ on every run. The bridge file holds private keys: it is mode 644 so the container's user (9031) can read it
+# on a Linux host, and keys/ is 700 so nobody else on the host can.
+services:
+  pingfederate:
+    volumes:
+      - ./keys/fapi2-attestation-mock-attesters.json:/opt/oidf-rig/fapi2-attestation-mock-attesters.json:ro
+      - ./keys/fapi2-attestation-bridge-keys.json:/opt/oidf-rig/fapi2-attestation-bridge-keys.json:ro
+    environment:
+      JAVA_OPTS: -Doidf.mock.attesters=/opt/oidf-rig/fapi2-attestation-mock-attesters.json
